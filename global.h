@@ -30,7 +30,7 @@ enum {FALSE = 0, TRUE};
 /* #define TICKS_PER_SEC 100 */
 
 #define RUN_UNIT_TESTS 1
-#define ENABLE_POOLS 1
+#define ENABLE_POOLS 0
 #define HEAP_DBG 1
 #define ARENA_DBG 1
 

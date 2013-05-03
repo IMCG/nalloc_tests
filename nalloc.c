@@ -19,17 +19,22 @@
 #include <stack.h>
 #include <global.h>
 
-#define START_ADDR ((void *) 0x00300000)
-#define END_ADDR ((void *) USER_MEM_START)
+/* #define START_ADDR ((void *) 0x00300000) */
+/* #define END_ADDR ((void *) USER_MEM_START) */
 
-COMPILE_ASSERT(ALIGNED(START_ADDR));
-COMPILE_ASSERT(ALIGNED(END_ADDR));
+/* COMPILE_ASSERT(ALIGNED(START_ADDR)); */
+/* COMPILE_ASSERT(ALIGNED(END_ADDR)); */
 
 /* TODO: asserts won't be thread safe now. */
 
-stack_t global_arenas = INITIALIZED_STACK;
-#define local_arenas (THIS_THREAD->nallocin.arenas)
-#define dummy (THIS_THREAD->nallocin.dummy)
+lfstack_t global_arenas = INITIALIZED_STACK;
+__thread nalloc_info_t nallocin;
+
+/* #define local_arenas (THIS_THREAD->nallocin.arenas) */
+/* #define dummy (THIS_THREAD->nallocin.dummy) */
+#define local_arenas (nallocin.arenas)
+#define dummy (nallocin.dummy)
+
 
 block_t *minb(block_t *a, block_t *b){
     return (block_t *) min((uptr_t) a, (uptr_t) b);
@@ -101,16 +106,16 @@ void _nsfree(void *buf, size_t size){
     _nfree(buf);
 }
 
-void nalloc_init(void){
-    trace2();
-    lprintf("arena: %d, block: %d", sizeof(arena_t), sizeof(used_block_t));
-    for(free_arena_t *cur = START_ADDR; (void *) cur < END_ADDR;
-        cur = next_free_arena(cur))
-    {
-        free_arena_init(cur, PAGE_SIZE);
-        stack_push(&cur->sanc, &global_arenas);
-    }
-}
+/* void nalloc_init(void){ */
+/*     trace2(); */
+/*     lprintf("arena: %d, block: %d", sizeof(arena_t), sizeof(used_block_t)); */
+/*     for(free_arena_t *cur = START_ADDR; (void *) cur < END_ADDR; */
+/*         cur = next_free_arena(cur)) */
+/*     { */
+/*         free_arena_init(cur, PAGE_SIZE); */
+/*         stack_push(&cur->sanc, &global_arenas); */
+/*     } */
+/* } */
 
 free_arena_t *next_free_arena(free_arena_t *a){
     return (void*) ((uptr_t) a + a->size);
@@ -120,7 +125,7 @@ void free_arena_init(free_arena_t *a, size_t size){
     trace4(a, p, size, d);
     *a = (free_arena_t ) {.sanc = INITIALIZED_SANCHOR,
                           .size = size,
-                          .owner = NULL};    
+                          .owner = 0};    
     assert(write_arena_magics(a));
 }
 
@@ -135,9 +140,9 @@ arena_t *arena_new(void){
 void arena_init(arena_t *arena){
     /* TODO */
     assert(arena->size == PAGE_SIZE);
-    arena->owner = THIS_THREAD;
+    arena->owner = pthread_self();
     arena->lanc = (lanchor_t) INITIALIZED_LANCHOR;
-    arena->wayward_blocks = (stack_t) INITIALIZED_STACK;
+    arena->wayward_blocks = (lfstack_t) INITIALIZED_STACK;
     for(int l = 0; l < NBLISTS; l++)
         arena->blists[l] = (blist_t) INITIALIZED_BLIST(1 << (MIN_POW + l));
 
@@ -211,7 +216,7 @@ used_block_t *alloc_from_arena(size_t size, size_t alignment, arena_t *arena){
 }
 
 used_block_t *alloc_from_blist(size_t enough, size_t alignment,
-                          arena_t *arena, blist_t *bl){
+                               arena_t *arena, blist_t *bl){
     block_t *found;
     FOR_EACH_LLOOKUP(found, block_t, lanc, &bl->blocks)
     {
@@ -224,10 +229,10 @@ used_block_t *alloc_from_blist(size_t enough, size_t alignment,
             assert(used_block_valid(shaved));
             if(!(shaved->size >= enough &&
                  aligned(shaved->data, alignment)))
-                   MAGIC_BREAK;
+                BREAK;
 
             assert(shaved->size >= enough &&
-                       aligned(shaved->data, alignment));
+                   aligned(shaved->data, alignment));
             return shaved;
         }
     }
@@ -279,7 +284,7 @@ void dealloc(used_block_t *_b){
     assert(used_block_valid(_b));
     block_t *b = (block_t *) _b;
     arena_t *arena = arena_of(b);
-    if(arena->owner == THIS_THREAD){
+    if(arena->owner == pthread_self()){
         b = merge_adjacent(b, arena);
         block_init(b, b->size, b->l_size);
         list_add_front(&b->lanc, &blist_smaller_than(b->size, arena)->blocks);
