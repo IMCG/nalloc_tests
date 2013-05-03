@@ -17,6 +17,7 @@
 #include <nalloc.h>
 #include <list.h>
 #include <stack.h>
+#include <sys/mman.h>
 #include <global.h>
 
 /* #define START_ADDR ((void *) 0x00300000) */
@@ -25,24 +26,13 @@
 /* COMPILE_ASSERT(ALIGNED(START_ADDR)); */
 /* COMPILE_ASSERT(ALIGNED(END_ADDR)); */
 
-/* TODO: asserts won't be thread safe now. */
-
-lfstack_t global_arenas = INITIALIZED_STACK;
-__thread nalloc_info_t nallocin;
+static lfstack_t global_arenas = INITIALIZED_STACK;
+__thread nalloc_info_t nallocin = INITIALIZED_NALLOC_INFO;
 
 /* #define local_arenas (THIS_THREAD->nallocin.arenas) */
 /* #define dummy (THIS_THREAD->nallocin.dummy) */
 #define local_arenas (nallocin.arenas)
 #define dummy (nallocin.dummy)
-
-
-block_t *minb(block_t *a, block_t *b){
-    return (block_t *) min((uptr_t) a, (uptr_t) b);
-}
-
-block_t *maxb(block_t *a, block_t *b){
-    return (block_t *) max((uptr_t) a, (uptr_t) b);
-}
 
 void *_nmalloc(size_t size){
     trace2(size, d);
@@ -131,7 +121,9 @@ void free_arena_init(free_arena_t *a, size_t size){
 
 arena_t *arena_new(void){
     free_arena_t *fa = stack_pop_lookup(free_arena_t, sanc, &global_arenas);
-    if(!fa)
+    if(!fa &&
+       !(fa = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)))
         return NULL;
     arena_init((arena_t *) fa);
     return (arena_t *) fa;
@@ -139,7 +131,8 @@ arena_t *arena_new(void){
 
 void arena_init(arena_t *arena){
     /* TODO */
-    assert(arena->size == PAGE_SIZE);
+    assert(aligned(arena, PAGE_SIZE));
+    arena->size = PAGE_SIZE;
     arena->owner = pthread_self();
     arena->lanc = (lanchor_t) INITIALIZED_LANCHOR;
     arena->wayward_blocks = (lfstack_t) INITIALIZED_STACK;

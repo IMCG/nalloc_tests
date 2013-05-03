@@ -12,32 +12,31 @@
 
 #include <list.h>
 #include <pthread.h>
-#include <kmalloc.h>
-#include <global.h>
 #include <sys/wait.h>
 #include <pebrand.h>
-
-#define PAGE_SIZE 4096
+#include <nalloc.h>
+#include <global.h>
 
 typedef void *(entrypoint_t)(void *);
-
 
 #define _yield(tid) pthread_yield()
 #define _wait wait
 #define exit(val) pthread_exit((void *) val)
 #define kfork(entry, arg, flag)                           \
-    pthread_create((pthread_t *){0}, NULL, entry, arg)    \
+    pthread_create(&kids[i], NULL, entry, arg)           \
+
+#define wsmalloc _nsmalloc
+#define wsfree _nsfree
+#define report_profile() 
 
 /* #define NUM_MALLOC_TESTERS 1000 */
 #define NUM_MALLOC_TESTERS 40
 #define NUM_ALLOCATIONS 1000
-#define NUM_OPS 100 * NUM_ALLOCATIONS
+#define NUM_OPS 10 * NUM_ALLOCATIONS
 #define REPORT_INTERVAL 100
 #define SIZE1 12
 #define SIZE2 16
 static int rdy;
-static pool_t pool1 = INITIALIZED_POOL(32);
-static pool_t pool2 = INITIALIZED_POOL(32);
 
 void mt_child(int parent_tid);
 
@@ -49,9 +48,9 @@ void malloc_test(void){
 
     (void) ret;
     (void) status;
-    (void) pool1;
-    (void) pool2;
-    
+
+    pthread_t kids[NUM_MALLOC_TESTERS];
+
     for(i = 0; i < NUM_MALLOC_TESTERS; i++){
         if(kfork((entrypoint_t *) mt_child, (void *) _gettid(), KERN_ONLY) < 0)
             LOGIC_ERROR("Failed to fork.");
@@ -59,13 +58,14 @@ void malloc_test(void){
 
     rdy = TRUE;
 
-    pthread_exit(0);
+    for(i = 0; i < NUM_MALLOC_TESTERS; i++)
+        assert(!pthread_join(kids[i], (void *[]){NULL}));
 }
 
-#define test_free(x) psfree(x, size, size == SIZE1 ? &pool1 : &pool2)
-#define test_malloc(x) psmalloc(x, size == SIZE1 ? &pool1 : &pool2)
-/* #define test_free(x) sfree(x, size) */
-/* #define test_malloc(x) smalloc(x) */
+/* #define test_free(x) pfree(x, size, size == SIZE1 ? &pool1 : &pool2) */
+/* #define test_malloc(x) pwsmalloc(x, size == SIZE1 ? &pool1 : &pool2) */
+#define test_free(x) wsfree(x, size)
+#define test_malloc(x) wsmalloc(x)
 
 /* Note: can be used to test speed of malloc too. How many times do you manage
    to go into the allocator before being preempted? */
@@ -112,7 +112,8 @@ void mt_child(int parent_tid){
         test_free(blocks[i]);
     }
 
-    exit(_gettid());
+    report_profile();
+    /* exit(_gettid()); */
 }
 
 void mt_child2(int parent_tid);
@@ -125,9 +126,8 @@ void malloc_test_randsize(){
 
     (void) ret;
     (void) status;
-    (void) pool1;
-    (void) pool2;
-    
+
+    pthread_t kids[NUM_MALLOC_TESTERS];
     for(i = 0; i < NUM_MALLOC_TESTERS; i++){
         if(kfork((entrypoint_t *) mt_child2, (void *) _gettid(), KERN_ONLY) < 0)
             LOGIC_ERROR("Failed to fork.");
@@ -135,10 +135,8 @@ void malloc_test_randsize(){
 
     rdy = TRUE;
 
-    /* for(i = 0; i < NUM_MALLOC_TESTERS; i++){ */
-    /*     assert((ret = _wait(&status)) > 0); */
-    /*     assert(status == ret); */
-    /* } */
+    for(i = 0; i < NUM_MALLOC_TESTERS; i++)
+        assert(!pthread_join(kids[i], (void *[]){NULL}));
 }
 
 void mt_child2(int parent_tid){
@@ -167,7 +165,7 @@ void mt_child2(int parent_tid){
 
         if(rand_percent(malloc_prob)){
             size = pebrand() % (PAGE_SIZE/2);
-            cur_block = smalloc(size);
+            cur_block = wsmalloc(size);
             if(!cur_block)
                 continue;
             *cur_block = (struct block_t)
@@ -187,18 +185,19 @@ void mt_child2(int parent_tid){
             for(int *m = cur_block->magics;
                 (uptr_t) m < (uptr_t) cur_block + cur_block->size; m++)
                 assert(*m == jid);
-            sfree(cur_block, cur_block->size);
+            wsfree(cur_block, cur_block->size);
         }
     }
 
     FOR_EACH_LLOOKUP(cur_block, struct block_t, lanc, &blocks){
         /* Hacky way to make the iteration safe after freeing. */
         struct block_t local_copy = *cur_block;
-        free(cur_block);
+        wsfree(cur_block, cur_block->size);
         cur_block = &local_copy;
     }
 
-    exit(_gettid());
+    report_profile();
+    /* exit(_gettid()); */
 }
 
 void mt_sharing_child();
@@ -224,6 +223,7 @@ void malloc_test_sharing(){
     for(int i = 0; i < NUM_STACKS; i++)
         shared.block_stacks[i] = (lfstack_t) INITIALIZED_STACK;
 
+    pthread_t kids[NUM_MALLOC_TESTERS];
     for(i = 0; i < NUM_MALLOC_TESTERS; i++){
         if(kfork((entrypoint_t *) mt_sharing_child, &shared, KERN_ONLY) < 0)
             LOGIC_ERROR("Failed to fork.");
@@ -231,16 +231,14 @@ void malloc_test_sharing(){
 
     rdy = TRUE;
 
-    for(i = 0; i < NUM_MALLOC_TESTERS; i++){
-        assert((ret = _wait(&status)) > 0);
-        assert(status == ret);
-    }
+    for(i = 0; i < NUM_MALLOC_TESTERS; i++)
+        assert(!pthread_join(kids[i], (void *[]){NULL}));
 
     for(int i = 0; i < NUM_STACKS; i++){
         lfstack_t *blocks = &shared.block_stacks[i];
         struct block_t *cur_block;
         FOR_EACH_SPOP_LOOKUP(cur_block, struct block_t, sanc, blocks)
-            free(cur_block);
+            wsfree(cur_block, cur_block->size);
     }
 }
 
@@ -269,7 +267,7 @@ void mt_sharing_child(
 
         if(rand_percent(malloc_prob)){
             size = pebrand() % (PAGE_SIZE/2);
-            cur_block = smalloc(size);
+            cur_block = wsmalloc(size);
             if(!cur_block)
                 continue;
             log("Allocated: %p", cur_block);
@@ -302,12 +300,15 @@ void mt_sharing_child(
             {
                 rassert(*m, ==, jid);
             }
-            sfree(cur_block, cur_block->size);
+            wsfree(cur_block, cur_block->size);
         }
     }
 
-    exit(_gettid());
+    report_profile();
+    /* exit(_gettid()); */
 }
+
+void *test(void *);
 
 int main(){
 
@@ -316,10 +317,9 @@ int main(){
     /*     return; */
     /* } */
     
-    trace();
+    /* trace(); */
     
-    init_pebrand(clock());
-
+    /* init_pebrand(clock()); */
     /* pebrand_test(); */
     /* probe_test(); */
     /* ret_addrs(); */
@@ -327,8 +327,8 @@ int main(){
     /* break_test(); */
     /* macro_test(); */
     /* malloc_test(); */
-    /* malloc_test2(); */
-    malloc_test_sharing();
+    malloc_test_randsize();
+    /* malloc_test_sharing(); */
     /* probe_kmem(); */
     /* cpuid_test(); */
     /* rwlock_test(); */

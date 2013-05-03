@@ -16,44 +16,6 @@ inline ptrdiff_t ptrdiff(void *a, void *b){
     return (uintptr_t) a - (uintptr_t) b;
 }
 
-inline int in_kernel_mem(void *addr){
-    return addr != NULL && (uintptr_t) addr < USER_MEM_START;
-}
-
-inline int in_user_mem(void *addr){
-    return (uintptr_t) addr >= USER_MEM_START;
-}
-
-inline int interrupts_enabled(){
-    return !!(get_eflags() & EFL_IF);
-}
-
-inline void strong_disable_interrupts(){
-    trace3();
-    assert(interrupts_enabled());
-    disable_interrupts();
-}
-
-inline void strong_enable_interrupts(){
-    trace3();
-    assert(!interrupts_enabled());
-    enable_interrupts();
-}
-
-inline int dbg_preempt_enabled(){
-    return _dbg_preempt_enabled;
-}
-
-inline void dbg_enable_preempt(){    
-    assert(!dbg_preempt_enabled());
-    _dbg_preempt_enabled = TRUE;
-}
-
-inline void dbg_disable_preempt(){
-    assert(dbg_preempt_enabled());
-    _dbg_preempt_enabled = FALSE;
-}
-
 /** 
  * @brief Copy the string src to the buffer at dest. Dest must be large
  * enough to hold src, including its null byte.
@@ -68,22 +30,6 @@ char* peb_stpcpy(char *dest, const char *src){
     return dest;
 }
 
-/** 
- * @brief Find the length of a string, below a limit.
- *
- * The null character isn't included in the length, but it does count towards
- * the limit.
- * 
- * @return The length of the given string, or -1 if it's longer than max
- * chars.
- */
-int strnlen(char *str, size_t max){
-    trace2(str, p, max, d);
-    for(int l = 0; l < max; l++)
-        if(str[l] == '\0')
-            return l;
-    return -1;
-}
 
 char *itobs_8(int num, itobsbuf8_t *bin){
     trace2(num, d, bin, p);
