@@ -23,10 +23,12 @@
 static lfstack_t global_arenas = INITIALIZED_STACK;
 __thread nalloc_info_t nallocin = INITIALIZED_NALLOC_INFO;
 
-/* #define local_arenas (THIS_THREAD->nallocin.arenas) */
-/* #define dummy (THIS_THREAD->nallocin.dummy) */
 #define local_arenas (nallocin.arenas)
 #define dummy (nallocin.dummy)
+
+static const int blist_size_lookup[] = {
+    32, 48, 64, 80, 112, 256, 512, 1024, 2048
+};
 
 void *_nmalloc(size_t size){
     trace2(size, lu);
@@ -120,7 +122,7 @@ void arena_init(arena_t *arena){
     arena->lanc = (lanchor_t) INITIALIZED_LANCHOR;
     arena->wayward_blocks = (lfstack_t) INITIALIZED_STACK;
     for(int l = 0; l < NBLISTS; l++)
-        arena->blists[l] = (blist_t) INITIALIZED_BLIST(1 << (MIN_POW + l));
+        arena->blists[l] = (blist_t) INITIALIZED_BLIST();
 
     block_t *b = (block_t *) arena->heap;
     block_init(b, arena->size - offsetof(arena_t, heap), MAX_BLOCK);
@@ -186,6 +188,8 @@ used_block_t *alloc_from_arena(size_t size, size_t alignment, arena_t *arena){
         if(found)
             return found;
     }
+
+    return NULL;
 
     used_block_t *found = alloc_from_blist(size, alignment, arena,
                                            blist_smaller_than(size, arena));
@@ -326,7 +330,7 @@ blist_t *blist_larger_than(size_t size, arena_t *arena){
     trace4(size, lu, arena, p);
     assert(size >= MIN_BLOCK);
     for(int i = 0; i < ARR_LEN(arena->blists); i++)
-        if(arena->blists[i].size >= size)
+        if(blist_size_lookup[i] >= size)
             return &arena->blists[i];
     LOGIC_ERROR();
     return NULL;
@@ -336,7 +340,7 @@ blist_t *blist_smaller_than(size_t size, arena_t *arena){
     trace4(size, lu, arena, p);
     assert(size <= MAX_BLOCK);
     for(int i = ARR_LEN(arena->blists) - 1; i >= 0; i--)
-        if(arena->blists[i].size <= size)
+        if(blist_size_lookup[i] <= size)
             return &arena->blists[i];
     LOGIC_ERROR();
     return NULL;

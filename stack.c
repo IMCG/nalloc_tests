@@ -14,7 +14,7 @@
 #include <asm_util.h>
 #include <global.h>
 
-#define MAX_FAILURES 20
+#define MAX_FAILURES 5
 
 void stack_push(sanchor_t *anc, lfstack_t *stack){
     trace(anc, p, stack, p, stack->size, d);

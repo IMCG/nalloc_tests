@@ -35,14 +35,6 @@ typedef struct{
     unsigned int free:1;
     unsigned int size:MAX_POW + 1;
     unsigned int l_size:MAX_POW + 1;
-} heyoo_t;
-
-COMPILE_ASSERT(sizeof(heyoo_t) == 4);
-
-typedef struct{
-    unsigned int free:1;
-    unsigned int size:MAX_POW + 1;
-    unsigned int l_size:MAX_POW + 1;
     lanchor_t lanc;
     int magics[];
 } block_t;
@@ -68,11 +60,10 @@ typedef struct{
 #include <stack.h>
 
 typedef struct{
-    size_t size;
     list_t blocks;
 } blist_t;
 
-#define INITIALIZED_BLIST(_size) {.size = _size, .blocks = INITIALIZED_LIST}
+#define INITIALIZED_BLIST(_size) {.blocks = INITIALIZED_LIST}
 
 typedef struct{
     size_t size;

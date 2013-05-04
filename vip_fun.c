@@ -11,7 +11,8 @@
 #include <string.h>
 
 const char *vip_list[] = {
-    "report_profile"
+    "report_profile",
+    "mt_child2"
 };
 
 int fun_is_very_important(const char *fun_name){

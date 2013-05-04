@@ -26,19 +26,20 @@ typedef void *(entrypoint_t)(void *);
 #define kfork(entry, arg, flag)                           \
     pthread_create(&kids[i], NULL, entry, arg)           \
 
-/* #define wsmalloc _nsmalloc */
-/* #define wsfree _nsfree */
+#define wsmalloc _nsmalloc
+#define wsfree _nsfree
 
-#define wsmalloc malloc
-#define wsfree(ptr, size) free(ptr)
+/* #define wsmalloc malloc */
+/* #define wsfree(ptr, size) free(ptr) */
 
 #define report_profile() 
 
 /* #define NUM_MALLOC_TESTERS 1000 */
 #define NUM_MALLOC_TESTERS 40
 #define NUM_ALLOCATIONS 1000
-#define NUM_OPS 10 * NUM_ALLOCATIONS
+#define NUM_OPS 50 * NUM_ALLOCATIONS
 #define REPORT_INTERVAL 100
+#define MAX_SIZE 128
 #define SIZE1 12
 #define SIZE2 16
 static int rdy;
@@ -145,6 +146,8 @@ void malloc_test_randsize(){
 }
 
 void mt_child2(int parent_tid){
+    trace2(parent_tid, d);
+    
     list_t blocks = INITIALIZED_LIST;
     int jid = _gettid();
     
@@ -169,7 +172,7 @@ void mt_child2(int parent_tid){
             log2("i:%d allocated:%d", i, blocks.size);
 
         if(rand_percent(malloc_prob)){
-            size = pebrand() % (PAGE_SIZE/2);
+            size = pebrand() % (MAX_SIZE);
             cur_block = wsmalloc(size);
             if(!cur_block)
                 continue;
@@ -271,13 +274,17 @@ void mt_sharing_child(
             log2("i:%d allocated:%d", i, blocks->size);
 
         if(rand_percent(malloc_prob)){
-            size = pebrand() % (PAGE_SIZE/2);
+            size = pebrand() % (MAX_SIZE);
             cur_block = wsmalloc(size);
             if(!cur_block)
                 continue;
             log2("Allocated: %p", cur_block);
             *cur_block = (struct block_t)
                 { .size = size, .sanc = INITIALIZED_SANCHOR };
+            /* Try to trigger false sharing. */
+            for(volatile int *m = cur_block->magics;
+                (uptr_t) m < (uptr_t) cur_block + size; m++)
+                *m = jid;
             stack_push(&cur_block->sanc, blocks);
         }else if(blocks->size){
             cur_block =
@@ -327,7 +334,7 @@ int main(){
     struct timespec end;
     assert(!clock_gettime(CLOCK_MONOTONIC, &end));
 
-    log("Millisec: %e",
+    log("Millisec: %f",
         1000 * (end.tv_sec - start.tv_sec) + 
         (double) (end.tv_nsec - start.tv_nsec) / 1000000.0);
     
