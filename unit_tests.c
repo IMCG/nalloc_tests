@@ -23,8 +23,8 @@ typedef void *(entrypoint_t)(void *);
 #define _yield(tid) pthread_yield()
 #define _wait wait
 #define exit(val) pthread_exit((void *) val)
-#define kfork(entry, arg, flag)                           \
-    pthread_create(&kids[i], NULL, entry, arg)           \
+#define kfork(entry, arg, flag)                 \
+    pthread_create(&kids[i], NULL, entry, arg)  \
 
 #define wsmalloc _nsmalloc
 #define wsfree _nsfree
@@ -35,9 +35,10 @@ typedef void *(entrypoint_t)(void *);
 #define report_profile() 
 
 /* #define NUM_MALLOC_TESTERS 1000 */
-#define NUM_MALLOC_TESTERS 40
+#define NUM_MALLOC_TESTERS 2
 #define NUM_ALLOCATIONS 1000
 #define NUM_OPS 50 * NUM_ALLOCATIONS
+#define MAX_WRITES  8
 #define REPORT_INTERVAL 100
 #define MAX_SIZE 128
 #define SIZE1 12
@@ -178,8 +179,11 @@ void mt_child2(int parent_tid){
                 continue;
             *cur_block = (struct block_t)
                 { . size = size, .lanc = INITIALIZED_LANCHOR };
+            /* Why doesn't this cause corruption if size isn't int aligned? */
             for(int *m = cur_block->magics;
-                (uptr_t) m < (uptr_t) cur_block + size; m++)
+                (uptr_t) m < (uptr_t) cur_block +
+                    umin(size, MAX_WRITES);
+                m++)
                 *m = jid;
             list_add_rear(&cur_block->lanc, &blocks);
         }else if(blocks.size){
@@ -191,7 +195,9 @@ void mt_child2(int parent_tid){
                 continue;
             list_remove(&cur_block->lanc, &blocks);
             for(int *m = cur_block->magics;
-                (uptr_t) m < (uptr_t) cur_block + cur_block->size; m++)
+                (uptr_t) m < (uptr_t) cur_block +
+                    umin(cur_block->size, MAX_WRITES);
+                m++)
                 assert(*m == jid);
             wsfree(cur_block, cur_block->size);
         }
@@ -283,7 +289,7 @@ void mt_sharing_child(
                 { .size = size, .sanc = INITIALIZED_SANCHOR };
             /* Try to trigger false sharing. */
             for(volatile int *m = cur_block->magics;
-                (uptr_t) m < (uptr_t) cur_block + size; m++)
+                (uptr_t) m < (uptr_t) cur_block + umin(size, MAX_WRITES); m++)
                 *m = jid;
             stack_push(&cur_block->sanc, blocks);
         }else if(blocks->size){
@@ -293,7 +299,9 @@ void mt_sharing_child(
                 log2("Claiming: %p", cur_block);
                 PINT(cur_block->size);
                 for(int *m = cur_block->magics;
-                    (uptr_t) m < (uptr_t) cur_block + cur_block->size; m++)
+                    (uptr_t) m < (uptr_t) cur_block + umin(cur_block->size,
+                                                           MAX_WRITES);
+                    m++)
                 {
                     *m = jid;
                 }
@@ -308,7 +316,9 @@ void mt_sharing_child(
                 continue;
             log2("Freeing priv: %p", cur_block);
             for(int *m = cur_block->magics;
-                (uptr_t) m < (uptr_t) cur_block + cur_block->size; m++)
+                (uptr_t) m < (uptr_t) cur_block + umin(cur_block->size,
+                                                       MAX_WRITES);
+                m++)
             {
                 rassert(*m, ==, jid);
             }
@@ -329,14 +339,13 @@ int main(){
     
     /* malloc_test(); */
     /* malloc_test_randsize(); */
-    malloc_test_sharing();
+    TIME(malloc_test_sharing());
+
+    void *tst;
+    TIME(tst = malloc(20));
+    TIME(free(tst));
     
     struct timespec end;
-    assert(!clock_gettime(CLOCK_MONOTONIC, &end));
-
-    log("Millisec: %f",
-        1000 * (end.tv_sec - start.tv_sec) + 
-        (double) (end.tv_nsec - start.tv_nsec) / 1000000.0);
     
     return 0;
 }

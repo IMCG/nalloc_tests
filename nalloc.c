@@ -170,7 +170,7 @@ used_block_t *alloc(size_t size, size_t alignment){
         PLUNT(size);
     }
 
-    absorb_all_wayward_blocks();
+    /* absorb_all_wayward_blocks(); */
 
     arena = list_pop_lookup(arena_t, lanc, &local.full_arenas);
     if(!arena && !(arena = arena_new()))

@@ -12,10 +12,17 @@
 
 #include <peb_macros.h>
 
-typedef enum{
-    CALLER_KERN = 0,
-    CALLER_USER = 1,
-} caller_type_t;
+#include <time.h>
+#define TIME(expr)                                                      \
+    do{                                                                 \
+        struct timespec __tstart;                                       \
+        clock_gettime(CLOCK_MONOTONIC, &__tstart);                      \
+        expr;                                                           \
+        struct timespec __tend;                                         \
+        clock_gettime(CLOCK_MONOTONIC, &__tend);                        \
+        log(#expr ": %f ms", 1000 * (__tend.tv_sec - __tstart.tv_sec) + \
+            (double) (__tend.tv_nsec - __tstart.tv_nsec) / 1000000.0);  \
+    }while(0)                                                       \
 
 
 #define printf_ln(...)                                                  \
