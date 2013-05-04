@@ -20,12 +20,6 @@
 #include <sys/mman.h>
 #include <global.h>
 
-/* #define START_ADDR ((void *) 0x00300000) */
-/* #define END_ADDR ((void *) USER_MEM_START) */
-
-/* COMPILE_ASSERT(ALIGNED(START_ADDR)); */
-/* COMPILE_ASSERT(ALIGNED(END_ADDR)); */
-
 static lfstack_t global_arenas = INITIALIZED_STACK;
 __thread nalloc_info_t nallocin = INITIALIZED_NALLOC_INFO;
 
@@ -95,17 +89,6 @@ void _nsfree(void *buf, size_t size){
             ((used_block_t *) buf - 1)->size);
     _nfree(buf);
 }
-
-/* void nalloc_init(void){ */
-/*     trace2(); */
-/*     lprintf("arena: %d, block: %d", sizeof(arena_t), sizeof(used_block_t)); */
-/*     for(free_arena_t *cur = START_ADDR; (void *) cur < END_ADDR; */
-/*         cur = next_free_arena(cur)) */
-/*     { */
-/*         free_arena_init(cur, PAGE_SIZE); */
-/*         stack_push(&cur->sanc, &global_arenas); */
-/*     } */
-/* } */
 
 free_arena_t *next_free_arena(free_arena_t *a){
     return (void*) ((uptr_t) a + a->size);

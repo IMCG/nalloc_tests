@@ -44,7 +44,7 @@ int _gettid(void);
 unsigned int _get_ticks(void);
 
 /* Set to 0 to disable all non-VIP logging. */
-#define LOG_MASTER 0
+#define LOG_MASTER 1
 #define DYNAMIC_LOG 0
 
 /* Set to 1 to enable mute_log() and unmute_log(). Turning it off will lead
@@ -60,53 +60,18 @@ unsigned int _get_ticks(void);
 /* Ranges from 0 to 4 in my code. 1 is usually for interface functions,
    and then 2 and below are for increasingly obscure helpers. */
 
-#define LOG_VM 0
-#define LOG_PAGES 0
-#define LOG_FRAMES 0
-#define LOG_NALLOC 2
-#define LOG_FILES 0
-#define LOG_VM_CLASSES 0
-#define LOG_LIFECYCLE 0
-#define LOG_LOADER 0
-#define LOG_SCHED 0
-#define LOG_CONTEXT_SWITCH 0
-
-#define LOG_SYSCALL 0
-#define LOG_EXCEPT 0
-#define LOG_SWEXN 0
+#define LOG_NALLOC 0
 #define LOG_ERRORS 0
-#define LOG_MODE_SWITCH 0
-
-#define LOG_CONSOLE_IO 0
-#define LOG_SYSCALL_ETC 0
-#define LOG_TIMER 0
-#define LOG_KEYBOARD 0
-#define LOG_CONSOLE 0
-#define LOG_DISK 0
 
 #define LOG_MAIN 0
-#define LOG_UTIL 0
 #define LOG_PEBRAND 0
 
-#define LOG_MUT 0
-#define LOG_SEM 0
-#define LOG_HAND 0
-#define LOG_RWLOCK 0
-#define LOG_REFCNT 0
-
-#define LOG_HASH 0
 #define LOG_LIST 0
-#define LOG_TREE 0
 #define LOG_STACK 0
 
-#define LOG_TEST_HARNESS 0
-#define LOG_CONSISTENCY 0
-#define LOG_LEAKCHK 0
-#define LOG_POISON 0
-#define LOG_LMM 0
 #define LOG_KMALLOC 0
 #define LOG_POOLS 0
-#define LOG_UNIT_TESTS 2
+#define LOG_UNIT_TESTS 1
 
 /* Set up dynamic controls that might be touchable in a debugger. */
 #if DYNAMIC_LOG && defined MODULE

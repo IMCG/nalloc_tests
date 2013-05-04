@@ -15,6 +15,7 @@
 #include <sys/wait.h>
 #include <pebrand.h>
 #include <nalloc.h>
+#include <stdlib.h>
 #include <global.h>
 
 typedef void *(entrypoint_t)(void *);
@@ -25,12 +26,16 @@ typedef void *(entrypoint_t)(void *);
 #define kfork(entry, arg, flag)                           \
     pthread_create(&kids[i], NULL, entry, arg)           \
 
-#define wsmalloc _nsmalloc
-#define wsfree _nsfree
+/* #define wsmalloc _nsmalloc */
+/* #define wsfree _nsfree */
+
+#define wsmalloc malloc
+#define wsfree(ptr, size) free(ptr)
+
 #define report_profile() 
 
 /* #define NUM_MALLOC_TESTERS 1000 */
-#define NUM_MALLOC_TESTERS 400
+#define NUM_MALLOC_TESTERS 40
 #define NUM_ALLOCATIONS 1000
 #define NUM_OPS 10 * NUM_ALLOCATIONS
 #define REPORT_INTERVAL 100
@@ -270,7 +275,7 @@ void mt_sharing_child(
             cur_block = wsmalloc(size);
             if(!cur_block)
                 continue;
-            log("Allocated: %p", cur_block);
+            log2("Allocated: %p", cur_block);
             *cur_block = (struct block_t)
                 { .size = size, .sanc = INITIALIZED_SANCHOR };
             stack_push(&cur_block->sanc, blocks);
@@ -278,7 +283,7 @@ void mt_sharing_child(
             cur_block =
                 stack_pop_lookup(struct block_t, sanc, blocks);
             if(cur_block){
-                log("Claiming: %p", cur_block);
+                log2("Claiming: %p", cur_block);
                 PINT(cur_block->size);
                 for(int *m = cur_block->magics;
                     (uptr_t) m < (uptr_t) cur_block + cur_block->size; m++)
@@ -294,7 +299,7 @@ void mt_sharing_child(
                 stack_pop_lookup(struct block_t, sanc, &priv_blocks);
             if(!cur_block)
                 continue;
-            log("Freeing priv: %p", cur_block);
+            log2("Freeing priv: %p", cur_block);
             for(int *m = cur_block->magics;
                 (uptr_t) m < (uptr_t) cur_block + cur_block->size; m++)
             {
@@ -310,37 +315,22 @@ void mt_sharing_child(
 
 void *test(void *);
 
+#include <time.h>
 int main(){
-
-    /* if(!RUN_UNIT_TESTS){ */
-    /*     done = TRUE; */
-    /*     return; */
-    /* } */
+    struct timespec start;
+    assert(!clock_gettime(CLOCK_MONOTONIC, &start));
     
-    /* trace(); */
-    
-    /* init_pebrand(clock()); */
-    /* pebrand_test(); */
-    /* probe_test(); */
-    /* ret_addrs(); */
-    /* aba_test(); */
-    /* break_test(); */
-    /* macro_test(); */
     /* malloc_test(); */
-    malloc_test_randsize();
-    /* malloc_test_sharing(); */
-    /* probe_kmem(); */
-    /* cpuid_test(); */
-    /* rwlock_test(); */
-    /* rwlock_broken_test(); */
-    /* lfstack_test(); */
-    /* dbg_test(); */
-    /* disk_test(); */
-    /* lend_test(); */
-    /* rand_fail_test(); */
+    /* malloc_test_randsize(); */
+    malloc_test_sharing();
+    
+    struct timespec end;
+    assert(!clock_gettime(CLOCK_MONOTONIC, &end));
 
-    /* done = TRUE; */
-
+    log("Millisec: %e",
+        1000 * (end.tv_sec - start.tv_sec) + 
+        (double) (end.tv_nsec - start.tv_nsec) / 1000000.0);
+    
     return 0;
 }
 
