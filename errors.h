@@ -81,7 +81,7 @@
 #define E_MAIN DBG, BRK, PRNT
 #define E_UTIL DBG, BRK, PRNT
 #define E_PEBRAND DBG, BRK, PRNT
-#define E_NALLOC DBG, BRK, PRNT
+#define E_NALLOC DBG, BRK, 2
 
 #define E_MUT 1, BRK, PRNT
 #define E_SEM 1, BRK, PRNT

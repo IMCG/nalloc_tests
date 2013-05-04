@@ -20,15 +20,12 @@
 #include <sys/mman.h>
 #include <global.h>
 
+#define MAX_ARENA_FAILS 20
+
 static lfstack_t global_arenas = INITIALIZED_STACK;
-__thread nalloc_info_t nallocin = INITIALIZED_NALLOC_INFO;
+__thread nalloc_info_t local = INITIALIZED_NALLOC_INFO;
 
-#define local_arenas (nallocin.arenas)
-#define dummy (nallocin.dummy)
-
-static const int blist_size_lookup[] = {
-    32, 48, 64, 80, 112, 256, 512, 1024, 2048
-};
+#define dummy (local.dummy)
 
 void *_nmalloc(size_t size){
     trace2(size, lu);
@@ -117,7 +114,7 @@ arena_t *arena_new(void){
 void arena_init(arena_t *arena){
     /* TODO */
     assert(aligned(arena, PAGE_SIZE));
-    arena->size = PAGE_SIZE;
+    arena->free_space = MAX_BLOCK;
     arena->owner = pthread_self();
     arena->lanc = (lanchor_t) INITIALIZED_LANCHOR;
     arena->wayward_blocks = (lfstack_t) INITIALIZED_STACK;
@@ -125,7 +122,7 @@ void arena_init(arena_t *arena){
         arena->blists[l] = (blist_t) INITIALIZED_BLIST();
 
     block_t *b = (block_t *) arena->heap;
-    block_init(b, arena->size - offsetof(arena_t, heap), MAX_BLOCK);
+    block_init(b, MAX_BLOCK, MAX_BLOCK);
     list_add_front(&b->lanc, &blist_smaller_than(b->size, arena)->blocks);
 }    
 
@@ -148,28 +145,37 @@ used_block_t *alloc(size_t size, size_t alignment){
     trace2(size, lu, alignment, lu);
     assert(alignment_valid(alignment));
 
-    assert(0);
-
     used_block_t *found;
     
     size = umax(size, MIN_BLOCK);
     assert(size <= MAX_BLOCK - sizeof(arena_t));
 
+    int arena_fails = 0;
     arena_t *arena;
-    FOR_EACH_LLOOKUP(arena, arena_t, lanc, &local_arenas){
+    FOR_EACH_LLOOKUP(arena, arena_t, lanc, &local.partial_arenas){
+        /* TODO: A circular LL would be ideal. */
         found = alloc_from_arena(size, alignment, arena);
         if(found)
             goto done;
+        if(++arena_fails > MAX_ARENA_FAILS)
+            break;
+        PINT(arena_fails);
+        PLUNT(arena->free_space);
+        PLUNT(size);
     }
 
     absorb_all_wayward_blocks();
-    
-    arena_t *new = arena_new();
-    if(!new)
-        return NULL;
-    list_add_rear(&new->lanc, &local_arenas);
-    found = alloc_from_arena(size, alignment, new);
 
+    arena = list_pop_lookup(arena_t, lanc, &local.full_arenas);
+    if(!arena && !(arena = arena_new()))
+        return NULL;
+
+    found = alloc_from_arena(size, alignment, arena);
+    if(size != MAX_BLOCK)
+        list_add_front(&arena->lanc, &local.partial_arenas);
+    else
+        list_add_front(&arena->lanc, &local.empty_arenas);
+    
 done:
     assert(found);
     assert(found->size >= size);
@@ -266,9 +272,23 @@ void dealloc(used_block_t *_b){
     block_t *b = (block_t *) _b;
     arena_t *arena = arena_of(b);
     if(arena->owner == pthread_self()){
+        
         b = merge_adjacent(b, arena);
         block_init(b, b->size, b->l_size);
         list_add_front(&b->lanc, &blist_smaller_than(b->size, arena)->blocks);
+        
+        arena->free_space += b->size;
+        if(arena->free_space == b->size)
+            list_remove(&arena->lanc, &local.empty_arenas);
+        else if(arena->free_space == MAX_BLOCK)
+            list_remove(&arena->lanc, &local.partial_arenas);
+
+        if(arena->free_space == MAX_BLOCK){
+            if(local.full_arenas.size > IDEAL_FULL_ARENAS)
+                arena_free(arena);
+            else
+                list_add_front(&arena->lanc, &local.full_arenas);
+        }
     }
     else
         return_wayward_block((wayward_block_t*) b, arena);
@@ -281,7 +301,10 @@ void return_wayward_block(wayward_block_t *b, arena_t *arena){
 
 void absorb_all_wayward_blocks(void){
     arena_t *cur_arena;
-    FOR_EACH_LLOOKUP(cur_arena, arena_t, lanc, &local_arenas)
+    FOR_EACH_LLOOKUP(cur_arena, arena_t, lanc, &local.partial_arenas)
+        if(absorb_wayward_block(cur_arena))
+            continue;
+    FOR_EACH_LLOOKUP(cur_arena, arena_t, lanc, &local.empty_arenas)
         if(absorb_wayward_block(cur_arena))
             continue;
 }
@@ -328,18 +351,17 @@ void *merge_adjacent(block_t *b, arena_t *arena){
 
 blist_t *blist_larger_than(size_t size, arena_t *arena){
     trace4(size, lu, arena, p);
-    assert(size >= MIN_BLOCK);
-    for(int i = 0; i < ARR_LEN(arena->blists); i++)
+    assert(size <= MAX_BLOCK);
+    for(int i = 0; i < NBLISTS; i++)
         if(blist_size_lookup[i] >= size)
             return &arena->blists[i];
-    LOGIC_ERROR();
-    return NULL;
+    return &arena->blists[NBLISTS];
 }
 
 blist_t *blist_smaller_than(size_t size, arena_t *arena){
     trace4(size, lu, arena, p);
-    assert(size <= MAX_BLOCK);
-    for(int i = ARR_LEN(arena->blists) - 1; i >= 0; i--)
+    assert(size >= MIN_BLOCK);
+    for(int i = NBLISTS - 1; i >= 0; i--)
         if(blist_size_lookup[i] <= size)
             return &arena->blists[i];
     LOGIC_ERROR();
@@ -354,7 +376,7 @@ block_t *l_neighbor(block_t *b){
 
 block_t *r_neighbor(block_t *b){
     arena_t *a = arena_of(b);
-    if((uptr_t) b + b->size == (uptr_t) a + a->size)
+    if((uptr_t) b + b->size == (uptr_t) a + ARENA_SIZE)
         return &dummy;
     return (block_t *) ((uptr_t) b + b->size);
 }
@@ -417,8 +439,6 @@ int free_arena_valid(free_arena_t *a){
 }
 
 int used_arena_valid(arena_t *a){
-    rassert(a->size, ==, PAGE_SIZE);
-    assert(lanchor_valid(&a->lanc, &local_arenas));
     return 1;
 }
 

@@ -53,8 +53,8 @@ unsigned int _get_ticks(void);
 
 /* Set to 1 to ignore all other verbosity settings inside functions on the
    vip_list in vip_fun.h. */
-#define VIP_MODE 0
-#define VIP_VERBOSITY 3
+#define VIP_MODE 1
+#define VIP_VERBOSITY 1
 
 /* -------- Per-module verbosity settings ---------- */
 /* Ranges from 0 to 4 in my code. 1 is usually for interface functions,

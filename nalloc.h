@@ -24,12 +24,15 @@
 #define MIN_POW 5
 #define MAX_POW 12
 
-#define NBLISTS (MAX_POW - MIN_POW + 1)
-
-#define MAX_BLOCK (1 << MAX_POW)
+#define MAX_BLOCK (ARENA_SIZE - offsetof(arena_t, heap))
 #define MIN_BLOCK (1 << MIN_POW)
 #define MIN_ALIGNMENT 16
 COMPILE_ASSERT(aligned(MIN_ALIGNMENT, sizeof(long long)));
+
+static const int blist_size_lookup[] = {
+    32, 48, 64, 80, 112, 256, 512, 1024,
+};
+#define NBLISTS ARR_LEN(blist_size_lookup)
 
 typedef struct{
     unsigned int free:1;
@@ -43,15 +46,19 @@ COMPILE_ASSERT(sizeof(unsigned int) == 4);
 COMPILE_ASSERT(sizeof(block_t) <= MIN_BLOCK);
 COMPILE_ASSERT(sizeof(block_t) == 8 + sizeof((block_t){}.lanc));
 
-/* TODO stack.h needs lifecycle.h */
+#define IDEAL_FULL_ARENAS 5
 typedef struct{
-    list_t arenas;
+    list_t full_arenas;
+    list_t partial_arenas;
+    list_t empty_arenas;
     block_t dummy;
 } nalloc_info_t;
 
 #define INITIALIZED_NALLOC_INFO                                 \
     {                                                           \
-        .arenas = INITIALIZED_LIST,                             \
+        .full_arenas = INITIALIZED_LIST,                        \
+            .partial_arenas = INITIALIZED_LIST,                 \
+            .empty_arenas = INITIALIZED_LIST,                   \
             .dummy = { .free = 0,                               \
                        .size = MAX_BLOCK,                       \
                        .l_size = MAX_BLOCK - sizeof(arena_t)}   \
@@ -73,7 +80,7 @@ typedef struct{
 } free_arena_t;
 
 typedef struct{
-    size_t size;
+    size_t free_space;
     pthread_t owner;
     lanchor_t lanc;
     lfstack_t wayward_blocks;
@@ -81,6 +88,9 @@ typedef struct{
     blist_t blists[NBLISTS];
     void *heap[];
 } arena_t;
+
+/* Depends on arena_t def. */
+COMPILE_ASSERT(MAX_BLOCK <= 1 << MAX_POW);
 
 typedef struct{
     unsigned int free:1;
