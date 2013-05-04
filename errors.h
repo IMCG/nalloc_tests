@@ -54,7 +54,7 @@
    with per-module settings if you don't want to. */
 #define BRK 1
 #define PRNT 1
-#define DBG 1
+#define DBG 0
 
 #define E_VM 1, BRK, PRNT
 #define E_PAGES DBG, BRK, PRNT

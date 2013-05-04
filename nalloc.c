@@ -163,6 +163,8 @@ used_block_t *alloc(size_t size, size_t alignment){
     trace2(size, lu, alignment, lu);
     assert(alignment_valid(alignment));
 
+    assert(0);
+
     used_block_t *found;
     
     size = umax(size, MIN_BLOCK);

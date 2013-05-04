@@ -30,7 +30,7 @@ typedef void *(entrypoint_t)(void *);
 #define report_profile() 
 
 /* #define NUM_MALLOC_TESTERS 1000 */
-#define NUM_MALLOC_TESTERS 40
+#define NUM_MALLOC_TESTERS 400
 #define NUM_ALLOCATIONS 1000
 #define NUM_OPS 10 * NUM_ALLOCATIONS
 #define REPORT_INTERVAL 100
