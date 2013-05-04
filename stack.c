@@ -27,7 +27,7 @@ void stack_push(sanchor_t *anc, lfstack_t *stack){
                        (int64_t) top)
             != (int64_t) top);
 
-    xadd(1, &stack->size);
+    /* xadd(1, &stack->size); */
 }
 
 sanchor_t *stack_pop(lfstack_t *stack){
@@ -38,12 +38,16 @@ sanchor_t *stack_pop(lfstack_t *stack){
 
     assert(aligned(&stack->top, 8));
 
-    xadd(-1, &stack->size);
+    /* Test&test&set */
+    if(!stack->top.ptr)
+        return NULL;
+    
+    /* xadd(-1, &stack->size); */
 
     do{
         old = stack->top;
         if(old.ptr == NULL){
-            xadd(1, &stack->size);
+            /* xadd(1, &stack->size); */
             return NULL;
         }
         new.tag = old.tag + 1;
