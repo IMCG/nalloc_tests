@@ -31,8 +31,8 @@ enum {FALSE = 0, TRUE};
 
 #define RUN_UNIT_TESTS 1
 #define ENABLE_POOLS 0
-#define HEAP_DBG 1
-#define ARENA_DBG 1
+#define HEAP_DBG 0
+#define ARENA_DBG 0
 
 /* How often will the frame and memory allocators play dead? And if we let
    them play dead, will we also let them emulate overcommit errors?
@@ -75,6 +75,8 @@ typedef unsigned int uint;
 
 #define _gettid pthread_self
 #define _get_ticks() time(NULL)
+
+typedef __int128_t int128_t;
 
 #endif  /* GLOBAL_H */
 

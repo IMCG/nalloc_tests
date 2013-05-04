@@ -35,19 +35,19 @@ __thread nalloc_info_t nallocin = INITIALIZED_NALLOC_INFO;
 #define dummy (nallocin.dummy)
 
 void *_nmalloc(size_t size){
-    trace2(size, d);
+    trace2(size, lu);
     used_block_t *found = alloc(size + sizeof(used_block_t), MIN_ALIGNMENT);
     return found ? found + 1 : NULL;
 }
 
 void *_nmemalign(size_t alignment, size_t size){
-    trace2(alignment, d, size, d);
+    trace2(alignment, lu, size, lu);
     used_block_t *found = alloc(size + sizeof(used_block_t), alignment);
     return found ? found + 1 : NULL;
 }
 
 void *_ncalloc(size_t nelt, size_t eltsize){
-    trace2(nelt, d, eltsize, d);
+    trace2(nelt, lu, eltsize, lu);
     uint8_t *new = _nmalloc(nelt * eltsize);
     if(new)
         for(int i = 0; i < nelt * eltsize; i++)
@@ -56,7 +56,7 @@ void *_ncalloc(size_t nelt, size_t eltsize){
 }
 
 void *_nrealloc(void *buf, size_t new_size){
-    trace2(buf, p, new_size, d);
+    trace2(buf, p, new_size, lu);
     void *new = _nmalloc(new_size);
     if(new && buf){
         memcpy(new, buf, ((used_block_t *) buf - 1)->size);
@@ -72,21 +72,21 @@ void _nfree(void *buf){
 
 /* TODO: Obviously... */
 void *_nsmalloc(size_t size){
-    trace2(size, d);
+    trace2(size, lu);
     if(size == PAGE_SIZE)
         return arena_new();
     return _nmalloc(size);
 }
 
 void *_nsmemalign(size_t alignment, size_t size){
-    trace2(alignment, d, size, d);
+    trace2(alignment, lu, size, lu);
     if(size == PAGE_SIZE && aligned(alignment, PAGE_SIZE))
         return arena_new();
     return _nmemalign(size, alignment);
 }
 
 void _nsfree(void *buf, size_t size){
-    trace2(buf, p, size, d);
+    trace2(buf, p, size, lu);
     if(size == PAGE_SIZE){
         arena_free((arena_t *) buf);
         return;
@@ -112,7 +112,7 @@ free_arena_t *next_free_arena(free_arena_t *a){
 }
 
 void free_arena_init(free_arena_t *a, size_t size){
-    trace4(a, p, size, d);
+    trace4(a, p, size, lu);
     *a = (free_arena_t ) {.sanc = INITIALIZED_SANCHOR,
                           .size = size,
                           .owner = 0};    
@@ -160,7 +160,7 @@ void block_init(block_t *b, size_t size, size_t l_size){
 }
 
 used_block_t *alloc(size_t size, size_t alignment){
-    trace2(size, d, alignment, d);
+    trace2(size, lu, alignment, lu);
     assert(alignment_valid(alignment));
 
     used_block_t *found;
@@ -192,7 +192,7 @@ done:
 }
 
 used_block_t *alloc_from_arena(size_t size, size_t alignment, arena_t *arena){
-    trace3(size, d, alignment, d);
+    trace3(size, lu, alignment, lu);
     
     for(blist_t *bl = blist_larger_than(size, arena);        
         bl < &arena->blists[NBLISTS];
@@ -242,7 +242,7 @@ int supports_alignment(block_t *b, size_t enough, size_t alignment){
 used_block_t *shave(block_t *b, size_t enough,
                     size_t alignment, arena_t *arena)
 {
-    trace3(b,p,enough,d,alignment,d);
+    trace3(b,p,enough,lu,alignment,lu);
 
     /* Move max shaved space to front while preserving alignment. */
     used_block_t *newb =
@@ -339,7 +339,7 @@ void *merge_adjacent(block_t *b, arena_t *arena){
 }
 
 blist_t *blist_larger_than(size_t size, arena_t *arena){
-    trace4(size, u, arena, p);
+    trace4(size, lu, arena, p);
     assert(size >= MIN_BLOCK);
     for(int i = 0; i < ARR_LEN(arena->blists); i++)
         if(arena->blists[i].size >= size)
@@ -349,7 +349,7 @@ blist_t *blist_larger_than(size_t size, arena_t *arena){
 }
 
 blist_t *blist_smaller_than(size_t size, arena_t *arena){
-    trace4(size, u, arena, p);
+    trace4(size, lu, arena, p);
     assert(size <= MAX_BLOCK);
     for(int i = ARR_LEN(arena->blists) - 1; i >= 0; i--)
         if(arena->blists[i].size <= size)

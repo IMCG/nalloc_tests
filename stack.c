@@ -22,7 +22,10 @@ void stack_push(sanchor_t *anc, lfstack_t *stack){
     do{
         top = stack->top.ptr;
         anc->next = top;
-    } while(cmpxchg((int)anc, (int*)&stack->top.ptr, (int)top) != (int) top);
+    } while(cmpxchg64b((int64_t) anc,
+                       (int64_t *) &stack->top.ptr,
+                       (int64_t) top)
+            != (int64_t) top);
 
     xadd(1, &stack->size);
 }
@@ -48,8 +51,10 @@ sanchor_t *stack_pop(lfstack_t *stack){
         new.ptr = old.ptr->next;
         pause_randomly();
     } while(stack->top.tag != old.tag ||
-            cmpxchg8b(*(int64_t*)&new, (int64_t*)&stack->top, *(int64_t*)&old)
-            != *(int64_t*)&old);
+            cmpxchg128b(*(__int128_t*) &new,
+                        (int128_t*) &stack->top,
+                        *(int128_t*) &old)
+            != *(int128_t*) &old);
                       
     return old.ptr;
 }

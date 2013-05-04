@@ -21,9 +21,6 @@
 #define __ASM_UTIL_H__
 
 #include <stdint.h>
-#include <peb_macros.h>
-
-COMPILE_ASSERT(sizeof(int) == 4);
 
 /** 
  * @brief Wrapper for the locked version of the x86 xadd instruction.
@@ -43,17 +40,6 @@ COMPILE_ASSERT(sizeof(int) == 4);
 int xadd(int source, int *dest);
 
 /** 
- * @brief Atomically place the value of source in the memory pointed to by
- * dest, and then return the initial value of *dest.
- * 
- * @param source 
- * @param dest 
- * 
- * @return The initial value of *dest.
- */
-int xchg(int source, int *dest);
-
-/** 
  * @brief Wrapper for the x86 cmpxchg instruction.
  *
  * atomically:
@@ -70,46 +56,7 @@ int xchg(int source, int *dest);
  * 
  * @return The initial value of *dest
  */
-int cmpxchg(int source, int *dest, int expected_dest);
-
-int64_t cmpxchg8b(int64_t src, int64_t *dest, int64_t expected_dest);
-
-
-/** 
- * @brief Wrapper for the invlpg instruction. Flush the TLB entry for bad_page.
- * 
- * @param bad_page The address of the page whose mapping we need to remove
- * from the TLB.
- */
-void invlpg(void *bad_page);
-
-
-void xor_atomic(int src, int *dest);
-
-/** 
- * @brief Return an address close to the current stack top. Useful for finding
- * out what stack you're on.
- * 
- */
-void *approx_esp(void);
-
-/** 
- * @brief Wrapper for hlt.
- * 
- */
-void hlt(void);
-
-typedef struct{
-    int32_t eax;
-    int32_t ebx;
-    int32_t ecx;
-    int32_t edx;
-} cpuid_t;
-
-/** 
- * Wrapper for cpuid.
- */
-void cpuid(int eax, cpuid_t *buf);
-
+int64_t cmpxchg64b(int64_t src, int64_t *dest, int64_t expected_dest);
+__int128_t cmpxchg128b(__int128_t src, __int128_t *dest, __int128_t expected_dest);
 
 #endif  /* __ASM_UTIL_H__ */

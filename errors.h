@@ -101,7 +101,7 @@
 #define E_LMM DBG, BRK, PRNT
 #define E_KMALLOC DBG, BRK, PRNT
 #define E_POOLS DBG, BRK, PRNT
-#define E_UNIT_TESTS DBG, BRK, 3
+#define E_UNIT_TESTS 3, BRK, 3
 
 /* #ifndef MODULE */
 /* #define MODULE MAIN */

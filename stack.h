@@ -19,21 +19,21 @@ typedef struct sanchor_t{
 #define INITIALIZED_SANCHOR { .next = NULL }
 
 typedef struct{
-    int tag;
+    int64_t tag;
     sanchor_t *ptr;
 } tagptr_t;
 
-COMPILE_ASSERT(sizeof(tagptr_t) == 8);
+COMPILE_ASSERT(sizeof(tagptr_t) == 16);
 
 typedef struct{
+    tagptr_t top __attribute__((__aligned__ (16)));
     int size;
-    tagptr_t top __attribute__((__aligned__ (8)));
 }lfstack_t;
 
 #define INITIALIZED_STACK                       \
     {                                           \
+        .top = {0, NULL},                       \
         .size = 0,                              \
-            .top = {0, NULL}                    \
     }
 
 #define lookup_sanchor(ptr, container_type, field)    \

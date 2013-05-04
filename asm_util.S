@@ -7,104 +7,30 @@
 */
 
 .global xadd
-.global xchg
-.global cmpxchg
-.global cmpxchg8b
-.global invlpg
-.global hlt
-.global cpuid
-
-.global approx_esp
+.global cmpxchg64b    
+.global cmpxchg128b
 
 xadd:
-    movl 4(%esp), %eax
-    movl 8(%esp), %edx
-        
-    lock xadd %eax, (%edx)
-
+    lock xadd %edi, (%rsi)
+    mov %edi, %eax
     ret
     
-xchg:   
-    movl    4(%esp), %eax          # Get arg1: src
-    movl    8(%esp), %ecx          # Get arg2: dest
-
-    xchg    %eax, (%ecx)
-
-    ret
-
-cmpxchg:
-    movl 4(%esp), %edx
-    movl 8(%esp), %ecx
-    movl 12(%esp), %eax
-
-    lock cmpxchg %edx, (%ecx)
-    ret
-
-cmpxchg8b:
-    pushl %ebx
-    pushl %esi
-    
-    movl 12(%esp), %ebx
-    movl 16(%esp), %ecx
-    movl 20(%esp), %esi
-    movl 24(%esp), %eax
-    movl 28(%esp), %edx
-
-    lock cmpxchg8b  (%esi)
-
-    popl %esi
-    popl %ebx
-    ret
-
-xor_locked:
-    movl 4(%esp), %eax
-    movl 8(%esp), %edx
-    
-    lock xor %eax, (%ecx)
-    
+cmpxchg64b:
+    mov %rdx, %rax
+    lock cmpxchg %rdi, (%rsi)
     ret
     
+cmpxchg128b:
+    push %rbx
+    
+    mov %rdi, %rbx
+    mov %rcx, %rax
+    mov %rsi, %rcx
+    mov %rdx, %rsi
+    mov %r8, %rdx
 
-invlpg:
-    mov     4(%esp),%eax        # Get arg1.
+    lock cmpxchg16b  (%rsi)
 
-    invlpg  (%eax)              # Invalidate *arg1
-
+    pop %rbx
     ret
     
-hlt:
-    hlt
-    ret
-
-approx_esp:
-    mov %esp, %eax
-    ret
-
-forward_call:
-    movl 4(%esp), %eax
-    movl (%esp), %ecx
-
-    addl $8, %esp
-    pushl %ecx
-
-    jmp *%eax
-    
-cpuid:
-    pushl %ebp
-    movl %esp, %ebp
-    pushl %ebx
-    pushl %esi
-
-    movl 8(%ebp), %eax
-    movl 12(%ebp), %esi
-    cpuid
-
-    movl %eax, (%esi)
-    movl %ebx, 4(%esi)
-    movl %ecx, 8(%esi)
-    movl %edx, 12(%esi)
-
-    popl %esi
-    popl %ebx
-    leave
-    ret

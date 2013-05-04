@@ -21,27 +21,35 @@
 #define PAGE_SIZE (0x1000)
 #define ARENA_SIZE (PAGE_SIZE)
 
-#define MIN_POW 4
+#define MIN_POW 5
 #define MAX_POW 12
 
 #define NBLISTS (MAX_POW - MIN_POW + 1)
 
 #define MAX_BLOCK (1 << MAX_POW)
 #define MIN_BLOCK (1 << MIN_POW)
-#define MIN_ALIGNMENT 8
-COMPILE_ASSERT(aligned(MIN_ALIGNMENT, sizeof(void*)));
+#define MIN_ALIGNMENT 16
+COMPILE_ASSERT(aligned(MIN_ALIGNMENT, sizeof(long long)));
 
 typedef struct{
     unsigned int free:1;
     unsigned int size:MAX_POW + 1;
     unsigned int l_size:MAX_POW + 1;
-    /* Padding. */
+} heyoo_t;
+
+COMPILE_ASSERT(sizeof(heyoo_t) == 4);
+
+typedef struct{
+    unsigned int free:1;
+    unsigned int size:MAX_POW + 1;
+    unsigned int l_size:MAX_POW + 1;
     lanchor_t lanc;
     int magics[];
 } block_t;
 
+COMPILE_ASSERT(sizeof(unsigned int) == 4);
 COMPILE_ASSERT(sizeof(block_t) <= MIN_BLOCK);
-COMPILE_ASSERT(sizeof(block_t) == 4 + sizeof((block_t){}.lanc));
+COMPILE_ASSERT(sizeof(block_t) == 8 + sizeof((block_t){}.lanc));
 
 /* TODO stack.h needs lifecycle.h */
 typedef struct{
@@ -87,7 +95,7 @@ typedef struct{
     unsigned int free:1;
     unsigned int size:MAX_POW + 1;
     unsigned int l_size:MAX_POW + 1;
-    void *data[];
+    int data[];
 } used_block_t;
 
 COMPILE_ASSERT(sizeof(used_block_t) == 4);
