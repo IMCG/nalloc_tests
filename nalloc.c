@@ -20,7 +20,7 @@
 #include <sys/mman.h>
 #include <global.h>
 
-#define MAX_ARENA_FAILS 20
+#define MAX_ARENA_FAILS 10
 
 static lfstack_t global_arenas = INITIALIZED_STACK;
 __thread nalloc_info_t local = INITIALIZED_NALLOC_INFO;
@@ -155,8 +155,13 @@ used_block_t *alloc(size_t size, size_t alignment){
     FOR_EACH_LLOOKUP(arena, arena_t, lanc, &local.partial_arenas){
         /* TODO: A circular LL would be ideal. */
         found = alloc_from_arena(size, alignment, arena);
-        if(found)
+        if(found){
+            if(arena->free_space == 0){
+                list_remove(&arena->lanc, &local.partial_arenas);
+                list_add_front(&arena->lanc, &local.empty_arenas);
+            }
             goto done;
+        }
         if(++arena_fails > MAX_ARENA_FAILS)
             break;
         PINT(arena_fails);
@@ -169,9 +174,9 @@ used_block_t *alloc(size_t size, size_t alignment){
     arena = list_pop_lookup(arena_t, lanc, &local.full_arenas);
     if(!arena && !(arena = arena_new()))
         return NULL;
-
     found = alloc_from_arena(size, alignment, arena);
-    if(size != MAX_BLOCK)
+
+    if(found->size != MAX_BLOCK)
         list_add_front(&arena->lanc, &local.partial_arenas);
     else
         list_add_front(&arena->lanc, &local.empty_arenas);
@@ -185,14 +190,19 @@ done:
 
 used_block_t *alloc_from_arena(size_t size, size_t alignment, arena_t *arena){
     trace3(size, lu, alignment, lu);
+
+    if(arena->free_space < size)
+        return NULL;
     
     for(blist_t *bl = blist_larger_than(size, arena);        
         bl < &arena->blists[NBLISTS];
         bl++)
     {
         used_block_t *found = alloc_from_blist(size, alignment, arena, bl);
-        if(found)
+        if(found){
+            arena->free_space -= found->size;
             return found;
+        }
     }
 
     return NULL;
