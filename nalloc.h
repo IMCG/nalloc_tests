@@ -137,7 +137,7 @@ void dealloc(used_block_t *_b);
 void *merge_adjacent(block_t *b, arena_t *arena);
 
 void return_wayward_block(wayward_block_t *b, arena_t *arena);
-void absorb_all_wayward_blocks(void);
+void absorb_all_wayward_blocks(list_t *arenas);
 void absorb_arena_blocks(arena_t *arena);
 
 void block_init(block_t *b, size_t size, size_t l_size);

@@ -233,6 +233,8 @@ used_block_t *alloc_from_blist(size_t enough, size_t alignment,
                    aligned(shaved->data, alignment));
             return shaved;
         }
+        /* Should only fail due to alignment issues. */
+        assert(alignment != MIN_ALIGNMENT);
     }
     return NULL;
 }
@@ -310,11 +312,9 @@ void return_wayward_block(wayward_block_t *b, arena_t *arena){
     stack_push(&b->sanc, &arena->wayward_blocks);
 }
 
-void absorb_all_wayward_blocks(void){
+void absorb_all_wayward_blocks(list_t *arenas){
     arena_t *cur_arena;
-    FOR_EACH_LLOOKUP(cur_arena, arena_t, lanc, &local.partial_arenas)
-        absorb_arena_blocks(cur_arena);
-    FOR_EACH_LLOOKUP(cur_arena, arena_t, lanc, &local.empty_arenas)
+    FOR_EACH_LLOOKUP(cur_arena, arena_t, lanc, arenas)
         absorb_arena_blocks(cur_arena);
 }
 
