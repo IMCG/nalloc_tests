@@ -36,6 +36,11 @@ typedef struct{
         .size = 0,                              \
     }
 
+typedef struct{
+    sanchor_t top;
+} substack_t;
+COMPILE_ASSERT(sizeof(substack_t) == sizeof(sanchor_t));
+
 #define lookup_sanchor(ptr, container_type, field)    \
     container_of(ptr, container_type, field)          
 
@@ -49,8 +54,20 @@ typedef struct{
         cur_struct = stack_pop_lookup(struct_type, field_name, stack)   \
         )                                                               \
 
-sanchor_t *stack_pop(lfstack_t *stack);
+#define FOR_EACH_SPOPALL_LOOKUP(cur_struct, struct_type, field_name, stack) \
+    for(                                                                \
+        cur_struct = lookup_sanchor(&stack_pop_all(stack)->top,          \
+                                    struct_type,                        \
+                                    field_name);                        \
+        cur_struct != NULL;                                             \
+        cur_struct = lookup_sanchor(cur_struct->field_name.next,        \
+                                    struct_type,                        \
+                                    field_name)                         \
+        )                                                               \
+
+
 void stack_push(sanchor_t *anc, lfstack_t *stack);
-sanchor_t *stack_next(lfstack_t *stack);
+sanchor_t *stack_pop(lfstack_t *stack);
+substack_t *stack_pop_all(lfstack_t *stack);
 
 #endif

@@ -39,6 +39,8 @@
  */
 int xadd(int source, int *dest);
 
+int64_t xchg64b(int64_t src, int64_t *dest);
+
 /** 
  * @brief Wrapper for the x86 cmpxchg instruction.
  *

@@ -7,12 +7,18 @@
 */
 
 .global xadd
+.global xchg64b    
 .global cmpxchg64b    
 .global cmpxchg128b
-
+    
 xadd:
     lock xadd %edi, (%rsi)
     mov %edi, %eax
+    ret
+
+xchg64b:
+    lock xchg %rdi, (%rsi)
+    mov %rdi, %rax
     ret
     
 cmpxchg64b:

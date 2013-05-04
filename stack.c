@@ -69,6 +69,8 @@ sanchor_t *stack_pop(lfstack_t *stack){
     return old.ptr;
 }
 
-int stack_size(lfstack_t *stack){
-    return stack->size;
+substack_t *stack_pop_all(lfstack_t *stack){
+    if(!stack->top.ptr)
+        return NULL;
+    return (substack_t *) xchg64b((int64_t) NULL, (int64_t *) &stack->top);
 }

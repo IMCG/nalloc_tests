@@ -153,7 +153,8 @@ used_block_t *alloc(size_t size, size_t alignment){
     int arena_fails = 0;
     arena_t *arena;
     FOR_EACH_LLOOKUP(arena, arena_t, lanc, &local.partial_arenas){
-        /* TODO: A circular LL would be ideal. */
+        /* TODO: A circular LL would be good.
+           TODO: Or could swap while iterating. */
         found = alloc_from_arena(size, alignment, arena);
         if(found){
             if(arena->free_space == 0){
@@ -312,20 +313,16 @@ void return_wayward_block(wayward_block_t *b, arena_t *arena){
 void absorb_all_wayward_blocks(void){
     arena_t *cur_arena;
     FOR_EACH_LLOOKUP(cur_arena, arena_t, lanc, &local.partial_arenas)
-        if(absorb_wayward_block(cur_arena))
-            continue;
+        absorb_arena_blocks(cur_arena);
     FOR_EACH_LLOOKUP(cur_arena, arena_t, lanc, &local.empty_arenas)
-        if(absorb_wayward_block(cur_arena))
-            continue;
+        absorb_arena_blocks(cur_arena);
 }
 
-inline int absorb_wayward_block(arena_t *arena){
-    wayward_block_t *block =
-        stack_pop_lookup(wayward_block_t, sanc,&arena->wayward_blocks) ;
-    if(!block)
-        return -1;
-    dealloc((used_block_t *) block);
-    return 0;
+void absorb_arena_blocks(arena_t *arena){
+    wayward_block_t *block;    
+    FOR_EACH_SPOPALL_LOOKUP(block, wayward_block_t, sanc,
+                            &arena->wayward_blocks)
+        dealloc((used_block_t *) block);
 }
 
 
