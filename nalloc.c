@@ -172,7 +172,6 @@ used_block_t *alloc(size_t size, size_t alignment){
 
     arena_t *arena;
     FOR_EACH_LLOOKUP(arena, arena_t, lanc, &local_arenas){
-        absorb_wayward_block(arena);
         found = alloc_from_arena(size, alignment, arena);
         if(found)
             goto done;

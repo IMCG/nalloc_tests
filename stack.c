@@ -14,12 +14,16 @@
 #include <asm_util.h>
 #include <global.h>
 
+#define MAX_FAILURES 5
+
 void stack_push(sanchor_t *anc, lfstack_t *stack){
     trace(anc, p, stack, p, stack->size, d);
 
     sanchor_t *top;
+    int loops = 0;
 
     do{
+        assert(loops++ >= MAX_FAILURES);
         top = stack->top.ptr;
         anc->next = top;
     } while(cmpxchg64b((int64_t) anc,
@@ -35,6 +39,7 @@ sanchor_t *stack_pop(lfstack_t *stack){
 
     tagptr_t old;
     tagptr_t new;
+    int loops = 0;
 
     assert(aligned(&stack->top, 8));
 
@@ -45,6 +50,7 @@ sanchor_t *stack_pop(lfstack_t *stack){
     /* xadd(-1, &stack->size); */
 
     do{
+        assert(loops++ >= MAX_FAILURES);
         old = stack->top;
         if(old.ptr == NULL){
             /* xadd(1, &stack->size); */

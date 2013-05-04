@@ -92,7 +92,7 @@
 #define E_HASH DBG, BRK, PRNT
 #define E_LIST DBG, BRK, PRNT
 #define E_TREE DBG, BRK, PRNT
-#define E_STACK DBG, BRK, PRNT
+#define E_STACK 1, BRK, PRNT
 
 #define E_TEST_HARNESS DBG, BRK, PRNT
 #define E_CONSISTENCY DBG, BRK, PRNT
