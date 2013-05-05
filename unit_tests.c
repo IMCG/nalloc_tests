@@ -23,29 +23,31 @@
 typedef void *(entrypoint_t)(void *);
 
 #define _yield(tid) pthread_yield()
-#define _wait wait
 #define exit(val) pthread_exit((void *) val)
 #define kfork(entry, arg, flag)                 \
     pthread_create(&kids[i], NULL, entry, arg)  \
 
-/* #define wsmalloc _nsmalloc */
-/* #define wsfree _nsfree */
+#define wsmalloc _nsmalloc
+#define wsfree _nsfree
 
-#define wsmalloc malloc
-#define wsfree(ptr, size) free(ptr)
+/* #define wsmalloc malloc */
+/* #define wsfree(ptr, size) free(ptr) */
 
 #define report_profile() 
 
 /* #define NUM_MALLOC_TESTERS 1000 */
-#define NUM_MALLOC_TESTERS 2
+#define NUM_MALLOC_TESTERS 8
 #define NUM_ALLOCATIONS 1000
-#define NUM_OPS 20 * NUM_ALLOCATIONS
+#define NUM_OPS 200 * NUM_ALLOCATIONS
 #define MAX_WRITES  8
 #define REPORT_INTERVAL 100
 #define MAX_SIZE 128
 #define SIZE1 12
 #define SIZE2 16
-static int rdy;
+
+/* Fun fact: without the volatile, a test-yield loop on rdy will optimize the
+   test part and will just yield in a loop forever. Thanks, GCC! */
+static volatile int rdy;
 
 static __thread unsigned int seed;
 void prand_init(void){
@@ -139,7 +141,7 @@ void mt_child(int parent_tid){
     /* exit(_gettid()); */
 }
 
-void mt_child2(int parent_tid);
+void mt_child_rand(int parent_tid);
 
 void malloc_test_randsize(){
     trace();
@@ -151,18 +153,17 @@ void malloc_test_randsize(){
     (void) status;
 
     pthread_t kids[NUM_MALLOC_TESTERS];
-    for(i = 0; i < NUM_MALLOC_TESTERS; i++){
-        if(kfork((entrypoint_t *) mt_child2, (void *) _gettid(), KERN_ONLY) < 0)
-            LOGIC_ERROR("Failed to fork.");
-    }
-
+    for(i = 0; i < NUM_MALLOC_TESTERS; i++)
+        assert(!kfork((entrypoint_t *) mt_child_rand,
+                      (void *) _gettid(), KERN_ONLY));
+    
     rdy = TRUE;
 
     for(i = 0; i < NUM_MALLOC_TESTERS; i++)
         assert(!pthread_join(kids[i], (void *[]){NULL}));
 }
 
-void mt_child2(int parent_tid){
+void mt_child_rand(int parent_tid){
     trace2(parent_tid, d);
     
     list_t blocks = INITIALIZED_LIST;
@@ -177,7 +178,7 @@ void mt_child2(int parent_tid){
 
     while(rdy == FALSE)
         _yield(parent_tid);
-    
+
     for(int i = 0; i < NUM_OPS; i++){
         int size;
         int malloc_prob =
@@ -356,8 +357,8 @@ int main(){
     assert(!clock_gettime(CLOCK_MONOTONIC, &start));
     
     /* malloc_test(); */
-    TIME(malloc_test_randsize());
-    /* TIME(malloc_test_sharing()); */
+    /* TIME(malloc_test_randsize()); */
+    TIME(malloc_test_sharing());
 
     void *tst;
     TIME(tst = malloc(20));
