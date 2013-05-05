@@ -28,18 +28,18 @@ typedef void *(entrypoint_t)(void *);
 #define kfork(entry, arg, flag)                 \
     pthread_create(&kids[i], NULL, entry, arg)  \
 
-#define wsmalloc _nsmalloc
-#define wsfree _nsfree
+/* #define wsmalloc _nsmalloc */
+/* #define wsfree _nsfree */
 
-/* #define wsmalloc malloc */
-/* #define wsfree(ptr, size) free(ptr) */
+#define wsmalloc malloc
+#define wsfree(ptr, size) free(ptr)
 
 #define report_profile() 
 
 /* #define NUM_MALLOC_TESTERS 1000 */
-#define NUM_MALLOC_TESTERS 1
+#define NUM_MALLOC_TESTERS 2
 #define NUM_ALLOCATIONS 1000
-#define NUM_OPS 50 * NUM_ALLOCATIONS
+#define NUM_OPS 20 * NUM_ALLOCATIONS
 #define MAX_WRITES  8
 #define REPORT_INTERVAL 100
 #define MAX_SIZE 128
@@ -356,8 +356,8 @@ int main(){
     assert(!clock_gettime(CLOCK_MONOTONIC, &start));
     
     /* malloc_test(); */
-    /* malloc_test_randsize(); */
-    TIME(malloc_test_sharing());
+    TIME(malloc_test_randsize());
+    /* TIME(malloc_test_sharing()); */
 
     void *tst;
     TIME(tst = malloc(20));
