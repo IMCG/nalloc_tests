@@ -36,9 +36,9 @@ typedef void *(entrypoint_t)(void *);
 #define report_profile() 
 
 /* #define NUM_MALLOC_TESTERS 1000 */
-#define NUM_MALLOC_TESTERS 20
+#define NUM_MALLOC_TESTERS 12
 #define NUM_ALLOCATIONS 1000
-#define NUM_OPS 50 * NUM_ALLOCATIONS
+#define NUM_OPS 500 * NUM_ALLOCATIONS
 #define MAX_WRITES  8
 #define REPORT_INTERVAL 100
 #define MAX_SIZE 128
@@ -46,7 +46,7 @@ typedef void *(entrypoint_t)(void *);
 #define SIZE2 16
 static int rdy;
 
-__thread static unsigned int seed;
+static __thread unsigned int seed;
 void prand_init(void){
     assert(read(open("/dev/urandom", O_RDONLY), &seed, sizeof(seed)) ==
            sizeof(seed));
