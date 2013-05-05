@@ -59,7 +59,6 @@ sanchor_t *stack_pop(lfstack_t *stack){
         new.tag = old.tag + 1;
         /* Even if out of date, this should always be a readable kern ptr. */
         new.ptr = old.ptr->next;
-        pause_randomly();
     } while(stack->top.tag != old.tag ||
             cmpxchg128b(*(__int128_t*) &new,
                         (int128_t*) &stack->top,

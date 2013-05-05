@@ -59,7 +59,6 @@ typedef unsigned int uint;
 /* Some of the wrapped utils depend on the config settings here. */
 #include <log.h>
 #include <pretty_print.h>
-#include <pebrand.h>
 
 #include <stdio.h>
 #include <limits.h>

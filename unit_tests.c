@@ -12,8 +12,9 @@
 
 #include <list.h>
 #include <pthread.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <sys/wait.h>
-#include <pebrand.h>
 #include <nalloc.h>
 #include <stdlib.h>
 #include <global.h>
@@ -35,7 +36,7 @@ typedef void *(entrypoint_t)(void *);
 #define report_profile() 
 
 /* #define NUM_MALLOC_TESTERS 1000 */
-#define NUM_MALLOC_TESTERS 2
+#define NUM_MALLOC_TESTERS 20
 #define NUM_ALLOCATIONS 1000
 #define NUM_OPS 50 * NUM_ALLOCATIONS
 #define MAX_WRITES  8
@@ -44,6 +45,20 @@ typedef void *(entrypoint_t)(void *);
 #define SIZE1 12
 #define SIZE2 16
 static int rdy;
+
+__thread static unsigned int seed;
+void prand_init(void){
+    assert(read(open("/dev/urandom", O_RDONLY), &seed, sizeof(seed)) ==
+           sizeof(seed));
+    /* assert(initstate(seed, prand_state, ARR_LEN(prand_state)) != prand_state); */
+}
+long int prand(void){
+    return rand_r(&seed);
+    /* return random(); */
+}
+int rand_percent(int per_centum){
+    return prand() % 100 <= per_centum;
+}
 
 void mt_child(int parent_tid);
 
@@ -151,6 +166,7 @@ void mt_child2(int parent_tid){
     
     list_t blocks = INITIALIZED_LIST;
     int jid = _gettid();
+    prand_init();
     
     struct block_t{
         lanchor_t lanc;
@@ -173,7 +189,7 @@ void mt_child2(int parent_tid){
             log2("i:%d allocated:%d", i, blocks.size);
 
         if(rand_percent(malloc_prob)){
-            size = pebrand() % (MAX_SIZE);
+            size = prand() % (MAX_SIZE);
             cur_block = wsmalloc(size);
             if(!cur_block)
                 continue;
@@ -188,7 +204,7 @@ void mt_child2(int parent_tid){
             list_add_rear(&cur_block->lanc, &blocks);
         }else if(blocks.size){
             cur_block =
-                lookup_lanchor(list_nth(pebrand() % blocks.size,
+                lookup_lanchor(list_nth(prand() % blocks.size,
                                         &blocks),
                                struct block_t, lanc);
             if(!cur_block)
@@ -262,6 +278,7 @@ void mt_sharing_child(
     int parent_tid = shared->parent_tid;
     int jid = _gettid();
     struct block_t *cur_block;
+    prand_init();
 
     while(rdy == FALSE)
         _yield(parent_tid);
@@ -269,7 +286,7 @@ void mt_sharing_child(
     lfstack_t priv_blocks = INITIALIZED_STACK;
     for(int i = 0; i < NUM_OPS; i++){
         int size;
-        lfstack_t *blocks= &shared->block_stacks[pebrand() % NUM_STACKS];
+        lfstack_t *blocks= &shared->block_stacks[prand() % NUM_STACKS];
         int malloc_prob =
             blocks->size < NUM_ALLOCATIONS/2 ? 75 :
             blocks->size < NUM_ALLOCATIONS ? 50 :
@@ -280,7 +297,7 @@ void mt_sharing_child(
             log2("i:%d allocated:%d", i, blocks->size);
 
         if(rand_percent(malloc_prob)){
-            size = pebrand() % (MAX_SIZE);
+            size = prand() % (MAX_SIZE);
             cur_block = wsmalloc(size);
             if(!cur_block)
                 continue;
