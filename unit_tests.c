@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
 #include <nalloc.h>
 #include <stdlib.h>
 #include <global.h>
@@ -36,9 +37,9 @@ typedef void *(entrypoint_t)(void *);
 #define report_profile() 
 
 /* #define NUM_MALLOC_TESTERS 1000 */
-#define NUM_MALLOC_TESTERS 12
+#define NUM_MALLOC_TESTERS 1
 #define NUM_ALLOCATIONS 1000
-#define NUM_OPS 500 * NUM_ALLOCATIONS
+#define NUM_OPS 50 * NUM_ALLOCATIONS
 #define MAX_WRITES  8
 #define REPORT_INTERVAL 100
 #define MAX_SIZE 128

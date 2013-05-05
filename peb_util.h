@@ -23,8 +23,7 @@
         log(#expr ": %f ms", 1000 * (__tend.tv_sec - __tstart.tv_sec) + \
             (double) (__tend.tv_nsec - __tstart.tv_nsec) / 1000000.0);  \
     }while(0)                                                       \
-
-
+    
 #define printf_ln(...)                                                  \
     printf(FIRST_ARG(__VA_ARGS__) "\n" COMMA_AND_TAIL_ARGS(__VA_ARGS__))
 
