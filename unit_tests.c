@@ -39,7 +39,7 @@ typedef void *(entrypoint_t)(void *);
 #define NUM_MALLOC_TESTERS 8
 #define NUM_ALLOCATIONS 1000
 #define NUM_OPS 200 * NUM_ALLOCATIONS
-#define MAX_WRITES  8
+#define MAX_WRITES  0
 #define REPORT_INTERVAL 100
 #define MAX_SIZE 128
 #define SIZE1 12
