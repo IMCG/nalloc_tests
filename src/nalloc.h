@@ -21,7 +21,7 @@
 #define PAGE_SIZE (0x1000)
 #define ARENA_SIZE (PAGE_SIZE)
 
-#define ARENA_ALLOC_BATCH 4
+#define ARENA_ALLOC_BATCH 16
 #define IDEAL_FULL_ARENAS 5
 
 #define MIN_POW 5

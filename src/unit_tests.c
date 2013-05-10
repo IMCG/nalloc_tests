@@ -225,7 +225,7 @@ void *mt_sharing_child(struct sharing_child_args *shared){
             0;
 
         if(rand_percent(malloc_prob)){
-            size = (MIN_SIZE + prand()) % MAX_SIZE;
+            size = min(MIN_SIZE + prand(),  MAX_SIZE);
             cur_block = wsmalloc(size);
             if(!cur_block)
                 continue;
