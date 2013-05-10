@@ -31,7 +31,7 @@ enum {FALSE = 0, TRUE};
 
 #define RUN_UNIT_TESTS 1
 #define ENABLE_POOLS 0
-#define HEAP_DBG 1
+#define HEAP_DBG 0
 #define ARENA_DBG 0
 
 /* How often will the frame and memory allocators play dead? And if we let

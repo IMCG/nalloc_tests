@@ -31,7 +31,7 @@
 #define MAX_ARENA_FAILS 10
 
 static lfstack_t free_arenas = INITIALIZED_STACK;
-__thread list_t private_arenas = INITIALIZED_LIST;
+__thread list_t priv_arenas = INITIALIZED_LIST;
 /* Warning: It happens to be the case that INITIALIZED_BLIST is a big fat
    NULL. */
 __thread blist_t blists[NBLISTS];
@@ -82,11 +82,13 @@ arena_t *arena_new(void){
     }
 
     fa->wayward_blocks = &priv_wayward_blocks;
+    list_add_front(&fa->lanc, &priv_arenas);
     
     return fa;
 }
 
 void arena_free(arena_t *freed){
+    list_remove(&freed->lanc, &priv_arenas);
     freed->wayward_blocks = &freed->disowned_blocks;
     stack_push(&freed->sanc, &free_arenas);
 }
@@ -98,13 +100,13 @@ used_block_t *alloc(size_t size){
 
     used_block_t *found;
 
-    for(blist_t *b = blist_larger_than(size); b < &blists[NBLISTS]; b++)
-        if( (found = alloc_from_blist(size, b)) )
-            goto done;
+    /* for(blist_t *b = blist_larger_than(size); b < &blists[NBLISTS]; b++) */
+    /*     if( (found = alloc_from_blist(size, b)) ) */
+    /*         goto done; */
 
-    found = alloc_from_wayward_blocks(size);
-    if(found)
-        goto done;
+    /* found = alloc_from_wayward_blocks(size); */
+    /* if(found) */
+    /*     goto done; */
     
     arena_t *a = arena_new();
     if(!a)
@@ -171,28 +173,13 @@ void dealloc(used_block_t *_b){
         b->free = 1;
         assert(write_block_magics(b));
             
-        if(b->size == MAX_BLOCK && private_arenas.size > IDEAL_FULL_ARENAS)
+        if(b->size == MAX_BLOCK)
             arena_free(arena);
         else
             list_add_front(&b->lanc, &blist_smaller_than(b->size)->blocks);
     }
     else
         return_wayward_block((wayward_block_t*) b, arena);
-}
-
-void return_wayward_block(wayward_block_t *b, arena_t *arena){
-    stack_push(&b->sanc, arena->wayward_blocks);
-}
-
-used_block_t *alloc_from_wayward_blocks(size_t size){
-    wayward_block_t *b;
-    used_block_t *found = NULL;
-    FOR_EACH_SPOPALL_LOOKUP(b, wayward_block_t, sanc, &priv_wayward_blocks){
-        if(!found && b->size >= size)
-            found = (used_block_t *) b;
-        dealloc((used_block_t *) b);
-    }
-    return found;
 }
 
 void *merge_adjacent(block_t *b){
@@ -224,6 +211,33 @@ void *merge_adjacent(block_t *b){
     return b;
 }
 
+void return_wayward_block(wayward_block_t *b, arena_t *arena){
+    stack_push(&b->sanc, arena->wayward_blocks);
+}
+
+used_block_t *alloc_from_wayward_blocks(size_t size){
+    wayward_block_t *b, *tmp;
+    used_block_t *found = NULL;
+    FOR_EACH_SPOPALL_LOOKUP(b, tmp, wayward_block_t, sanc,
+                            &priv_wayward_blocks)
+    {
+        if(!found && b->size >= size)
+            found = (used_block_t *) b;
+        /* dealloc((used_block_t *) b); */
+    }
+    return found;
+}
+
+void free_arenas_atexit(void){
+    /* TODO: Obvious placeholder. */
+    for(int i = 0; i < NBLISTS; i++){
+        arena_t *cur;
+        FOR_EACH_LLOOKUP(cur, arena_t, lanc, &priv_arenas)
+            cur->wayward_blocks = &cur->disowned_blocks;
+    }
+        
+}
+
 blist_t *blist_larger_than(size_t size){
     trace4(size, lu);
     assert(size <= MAX_BLOCK);
@@ -246,6 +260,7 @@ blist_t *blist_smaller_than(size_t size){
 block_t *l_neighbor(block_t *b){
     if((uptr_t) b == (uptr_t) arena_of(b)->heap)
         return NULL;
+    assert(arena_of(((block_t *) ((uptr_t) b - b->l_size))) == arena_of(b));
     return (block_t *) ((uptr_t) b - b->l_size);
 }
 
@@ -253,6 +268,7 @@ block_t *r_neighbor(block_t *b){
     arena_t *a = arena_of(b);
     if((uptr_t) b + b->size == (uptr_t) a + MAX_BLOCK)
         return NULL;
+    assert(arena_of(((block_t *) ((uptr_t) b + b->size))) == arena_of(b));
     return (block_t *) ((uptr_t) b + b->size);
 }
 

@@ -9,8 +9,6 @@
 
 #include <global.h>
 
-static int _dbg_preempt_enabled = TRUE;
-
 inline ptrdiff_t ptrdiff(void *a, void *b){
     assert(a >= b);
     return (uintptr_t) a - (uintptr_t) b;

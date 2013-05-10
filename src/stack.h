@@ -34,11 +34,6 @@ typedef struct{
         .top = {0, NULL},                       \
     }
 
-typedef struct{
-    sanchor_t top;
-} substack_t;
-COMPILE_ASSERT(sizeof(substack_t) == sizeof(sanchor_t));
-
 #define lookup_sanchor(ptr, container_type, field)    \
     container_of(ptr, container_type, field)          
 
@@ -52,20 +47,22 @@ COMPILE_ASSERT(sizeof(substack_t) == sizeof(sanchor_t));
         cur_struct = stack_pop_lookup(struct_type, field_name, stack)   \
         )                                                               \
 
-#define FOR_EACH_SPOPALL_LOOKUP(cur_struct, struct_type, field_name, stack) \
+#define FOR_EACH_SPOPALL_LOOKUP(cur_struct, tmp, struct_type, field_name, stack) \
     for(                                                                \
-        cur_struct = lookup_sanchor(&stack_pop_all(stack)->top,          \
-                                    struct_type,                        \
-                                    field_name);                        \
+        ((cur_struct = lookup_sanchor(stack_pop_all(stack),             \
+                                      struct_type,                      \
+                                      field_name)) != NULL)             \
+        && (printf("%p", cur_struct),                                   \
+            (tmp = lookup_sanchor(cur_struct->field_name.next,          \
+                                 struct_type,                           \
+                                  field_name)));                        \
         cur_struct != NULL;                                             \
-        cur_struct = lookup_sanchor(cur_struct->field_name.next,        \
-                                    struct_type,                        \
-                                    field_name)                         \
+        cur_struct = tmp                                                \
         )                                                               \
 
 
 void stack_push(sanchor_t *anc, lfstack_t *stack);
 sanchor_t *stack_pop(lfstack_t *stack);
-substack_t *stack_pop_all(lfstack_t *stack);
+sanchor_t *stack_pop_all(lfstack_t *stack);
 
 #endif

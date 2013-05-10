@@ -21,6 +21,7 @@ void stack_push(sanchor_t *anc, lfstack_t *stack){
 
     sanchor_t *top;
     int loops = 0;
+    (void) loops;
 
     do{
         /* assert(loops++ <= MAX_FAILURES); */
@@ -40,6 +41,7 @@ sanchor_t *stack_pop(lfstack_t *stack){
     tagptr_t old;
     tagptr_t new;
     int loops = 0;
+    (void) loops;
 
     assert(aligned(&stack->top, 8));
 
@@ -60,8 +62,8 @@ sanchor_t *stack_pop(lfstack_t *stack){
     return old.ptr;
 }
 
-substack_t *stack_pop_all(lfstack_t *stack){
+sanchor_t *stack_pop_all(lfstack_t *stack){
     if(!stack->top.ptr)
         return NULL;
-    return (substack_t *) xchg64b((int64_t) NULL, (int64_t *) &stack->top);
+    return (sanchor_t *) xchg64b((int64_t) NULL, (int64_t *) &stack->top);
 }

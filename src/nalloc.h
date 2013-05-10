@@ -81,12 +81,14 @@ typedef struct{
 
 #define INITIALIZED_BLIST {.blocks = INITIALIZED_LIST}
 
-/* TODO: Need a list of blocks here. */
 typedef struct  __attribute__ ((packed)){
     lfstack_t disowned_blocks;
-    sanchor_t sanc;
+    union{
+        sanchor_t sanc;
+        lanchor_t lanc;
+    };
     lfstack_t *wayward_blocks;
-    uint8_t pad[12];
+    uint8_t pad[4];
     block_t heap[];
 } arena_t;
 
@@ -125,6 +127,7 @@ void *merge_adjacent(block_t *b);
 
 void return_wayward_block(wayward_block_t *b, arena_t *arena);
 used_block_t *alloc_from_wayward_blocks(size_t size);
+void free_arenas_atexit(void);
 
 void block_init(block_t *b, size_t size, size_t l_size);
 int supports_alignment(block_t *b, size_t enough, size_t alignment);

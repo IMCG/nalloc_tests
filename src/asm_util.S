@@ -11,10 +11,10 @@
 .global cmpxchg64b    
 .global cmpxchg128b
     
-xadd:
-    lock xadd %edi, (%rsi)
-    mov %edi, %eax
-    ret
+## xadd:
+##     lock xadd %edi, (%rsi)
+##     mov %edi, %eax
+##     ret
 
 xchg64b:
     lock xchg %rdi, (%rsi)
