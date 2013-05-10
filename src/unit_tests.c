@@ -41,7 +41,7 @@ typedef void *(entrypoint_t)(void *);
 #define MAX_WRITES  0
 #define REPORT_INTERVAL 100
 #define MAX_SIZE 128
-#define MIN_SIZE sizeof(tblock_t)
+#define MIN_SIZE (sizeof(tblock_t) + 1) 
 
 #define NUM_STACKS 32
 
