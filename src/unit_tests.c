@@ -265,9 +265,15 @@ void *mt_sharing_child(struct sharing_child_args *shared){
 
 void *test(void *);
 
+void hi(){
+    trace2();
+}
+
 #include <time.h>
 int main(){
     struct timespec start;
+
+    hi();
     
     /* malloc_test(); */
     /* TIME(malloc_test_randsize()); */

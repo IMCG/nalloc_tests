@@ -17,7 +17,7 @@
 #define MAX_FAILURES 5
 
 void stack_push(sanchor_t *anc, lfstack_t *stack){
-    trace(anc, p, stack, p);
+    trace(anc, p);
 
     sanchor_t *top;
     int loops = 0;

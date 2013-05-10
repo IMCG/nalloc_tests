@@ -44,7 +44,7 @@ int _gettid(void);
 unsigned int _get_ticks(void);
 
 /* Set to 0 to disable all non-VIP logging. */
-#define LOG_MASTER 1
+#define LOG_MASTER 0
 #define DYNAMIC_LOG 0
 
 /* Set to 1 to enable mute_log() and unmute_log(). Turning it off will lead
@@ -60,7 +60,7 @@ unsigned int _get_ticks(void);
 /* Ranges from 0 to 4 in my code. 1 is usually for interface functions,
    and then 2 and below are for increasingly obscure helpers. */
 
-#define LOG_NALLOC 0
+#define LOG_NALLOC 1
 #define LOG_ERRORS 0
 
 #define LOG_MAIN 0
