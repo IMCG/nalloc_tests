@@ -72,6 +72,8 @@ void block_init(block_t *b, size_t size, size_t l_size){
 void free_arena_init(arena_t *a){
     trace4(a, p);
     *a = (arena_t) INITIALIZED_FREE_ARENA;
+    block_init(a->heap, MAX_BLOCK, MAX_BLOCK);
+    assert(aligned(((used_block_t*)&a->heap[0])->data, MIN_ALIGNMENT));
 }
 
 arena_t *arena_new(void){
@@ -103,7 +105,7 @@ void arena_free(arena_t *freed){
 used_block_t *alloc(size_t size){
     trace2(size, lu);
     assert(size <= MAX_BLOCK);
-    assert(size >= MAX_BLOCK);
+    assert(size >= MIN_BLOCK);
 
     used_block_t *found;
 
@@ -115,13 +117,11 @@ used_block_t *alloc(size_t size){
     arena_t *a = arena_new();
     if(!a)
         return NULL;
-
-    block_init(a->heap, MAX_BLOCK, MAX_BLOCK);
     found = alloc_from_block(a->heap, size);
     
 done:
     assert(found);
-    assert(found->size >= size);
+    rassert(found->size, >=, size);
     assert(aligned(found->data, MIN_ALIGNMENT));
     return found;
 }
@@ -130,13 +130,13 @@ used_block_t *alloc_from_blist(size_t size, blist_t *bl){
     block_t *b = list_pop_lookup(block_t, lanc, &bl->blocks);
     if(!b)
         return NULL;
-    used_block_t *shaved = shave(b, size);
-    shaved->free = 0;
-    return shaved;
+    return alloc_from_block(b, size);
 }
 
 used_block_t *alloc_from_block(block_t *b, size_t size){
-
+    used_block_t *shaved = shave(b, size);
+    shaved->free = 0;
+    return shaved;
 }
 
 used_block_t *shave(block_t *b, size_t size){
@@ -159,8 +159,11 @@ used_block_t *shave(block_t *b, size_t size){
 
         log("Split - %p:%u | %p:%u", b, b->size, newb, newb->size);
 
-        list_add_front(&b->lanc,
-                       &blist_smaller_than(b->size)->blocks);
+        if(shavesize >= MIN_BLOCK)
+            list_add_front(&b->lanc,
+                           &blist_smaller_than(b->size)->blocks);
+        else
+            assert(is_junk_block(b));
     }
     
     return newb;
@@ -266,6 +269,10 @@ block_t *r_neighbor(block_t *b){
 
 arena_t *arena_of(block_t *b){
     return (arena_t *) align_down_pow2(b, PAGE_SIZE);
+}
+
+int is_junk_block(block_t *b){
+    return b->size < MIN_BLOCK;
 }
 
 int free_block_valid(block_t *b){

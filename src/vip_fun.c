@@ -13,7 +13,6 @@
 const char *vip_list[] = {
     "alloc",
     "shave",
-    "supports_alignment",
 };
 
 int fun_is_very_important(const char *fun_name){

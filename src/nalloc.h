@@ -27,9 +27,11 @@
 #define MIN_POW 5
 #define MAX_POW 12
 
-#define MAX_BLOCK (ARENA_SIZE - offsetof(arena_t, heap))
+#define MAX_BLOCK (const_align_down_pow2(ARENA_SIZE - offsetof(arena_t, heap), \
+                                         MIN_BLOCK))
 #define MIN_BLOCK (1 << MIN_POW)
 #define MIN_ALIGNMENT 16
+COMPILE_ASSERT(aligned(MIN_BLOCK, MIN_ALIGNMENT));
 COMPILE_ASSERT(aligned(MIN_ALIGNMENT, sizeof(long long)));
 
 static const int blist_size_lookup[] = {
@@ -41,8 +43,8 @@ COMPILE_ASSERT(ARR_LEN(blist_size_lookup) == NBLISTS);
 
 typedef struct{
     unsigned int free:1;
-    unsigned int size:MAX_POW + 1;
-    unsigned int l_size:MAX_POW + 1;
+    unsigned int size:MAX_POW;
+    unsigned int l_size:MAX_POW;
     lanchor_t lanc;
 
     /* __aligned__ didn't do the trick, surprisingly. GCC manual mentions
@@ -60,18 +62,44 @@ typedef struct{
     list_t blocks;
 } blist_t;
 
+typedef struct{
+    unsigned int free:1;
+    unsigned int size:MAX_POW;
+    unsigned int l_size:MAX_POW;
+    int data[];
+} used_block_t;
+
+COMPILE_ASSERT(sizeof(used_block_t) == 4);
+
+typedef struct{
+    unsigned int free:1;
+    unsigned int size:MAX_POW;
+    unsigned int l_size:MAX_POW;
+    sanchor_t sanc;
+    void *data[];
+} wayward_block_t;
+
 #define INITIALIZED_BLIST {.blocks = INITIALIZED_LIST}
 
 /* TODO: Need a list of blocks here. */
-typedef struct{
-    pthread_t owner;
+typedef struct  __attribute__ ((packed)){
     lfstack_t wayward_blocks;
     union{
         sanchor_t sanc;
         lanchor_t lanc;
     };
+    pthread_t owner;
+    uint8_t pad[4];
     block_t heap[];
 } arena_t;
+
+/* This makes guaranteeing min alignment trivial. */
+COMPILE_ASSERT(aligned(offsetof(arena_t, heap) +
+                       offsetof(used_block_t, data),
+                       MIN_ALIGNMENT));
+
+/* Depends on arena_t def. */
+COMPILE_ASSERT(MAX_BLOCK < 1 << MAX_POW);
 
 #define INITIALIZED_FREE_ARENA                                          \
     {                                                                   \
@@ -80,25 +108,6 @@ typedef struct{
             .sanc = INITIALIZED_SANCHOR,                                \
             }
 
-/* Depends on arena_t def. */
-COMPILE_ASSERT(MAX_BLOCK <= 1 << MAX_POW);
-
-typedef struct{
-    unsigned int free:1;
-    unsigned int size:MAX_POW + 1;
-    unsigned int l_size:MAX_POW + 1;
-    int data[];
-} used_block_t;
-
-COMPILE_ASSERT(sizeof(used_block_t) == 4);
-
-typedef struct{
-    unsigned int free:1;
-    unsigned int size:MAX_POW + 1;
-    unsigned int l_size:MAX_POW + 1;
-    sanchor_t sanc;
-    void *data[];
-} wayward_block_t;
 
 void *nmalloc(size_t size);
 void nfree(void *buf);
@@ -122,7 +131,6 @@ void absorb_all_wayward_blocks(list_t *arenas);
 void absorb_arena_blocks(arena_t *arena);
 
 void block_init(block_t *b, size_t size, size_t l_size);
-arena_t *arena_of(block_t *b);
 int supports_alignment(block_t *b, size_t enough, size_t alignment);
 
 blist_t *blist_smaller_than(size_t size);
@@ -130,6 +138,9 @@ blist_t *blist_larger_than(size_t size);
 
 block_t *r_neighbor(block_t *b);
 block_t *l_neighbor(block_t *b);
+
+arena_t *arena_of(block_t *b);
+int is_junk_block(block_t *b);
 
 int free_arena_valid(arena_t *a);
 int used_arena_valid(arena_t *a);
