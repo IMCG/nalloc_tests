@@ -131,10 +131,8 @@ lanchor_t *list_pop(list_t *list){
 
     assert(list_valid_quick(list));
 
-    if(list->head == NULL){
-        log("Attempted pop on empty list.");
+    if(list->head == NULL)
         return NULL;
-    }
 
     outnode = list->head;
 

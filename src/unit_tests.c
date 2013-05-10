@@ -35,12 +35,12 @@ typedef void *(entrypoint_t)(void *);
 
 /* #define NUM_MALLOC_TESTERS 1000 */
 #define NUM_THREADS 5
-#define NUM_ALLOCATIONS 10
+#define NUM_ALLOCATIONS 5000
 #define NUM_OPS 1000 * NUM_ALLOCATIONS
 #define MAX_WRITES  MAX_SIZE
 #define REPORT_INTERVAL 100
 
-#define NUM_STACKS 8
+#define NUM_STACKS 16
 #define NUM_LISTS 32
 
 struct tblock_t{
@@ -196,12 +196,12 @@ void malloc_test_sharing(){
     for(int i = 0; i < NUM_THREADS; i++)
         assert(!pthread_join(kids[i], (void *[]){NULL}));
 
-    for(int i = 0; i < NUM_STACKS; i++){
-        lfstack_t *blocks = &shared.block_stacks[i];
-        struct tblock_t *cur_block, *tmp;
-        FOR_EACH_SPOPALL_LOOKUP(cur_block, tmp, struct tblock_t, sanc, blocks)
-            wsfree(cur_block, cur_block->size);
-    }
+    /* for(int i = 0; i < NUM_STACKS; i++){ */
+    /*     lfstack_t *blocks = &shared.block_stacks[i]; */
+    /*     struct tblock_t *cur_block, *tmp; */
+    /*     FOR_EACH_SPOPALL_LOOKUP(cur_block, tmp, struct tblock_t, sanc, blocks) */
+    /*         wsfree(cur_block, cur_block->size); */
+    /* } */
 }
 
 void mt_sharing_child(struct child_args *shared){

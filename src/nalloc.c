@@ -73,7 +73,7 @@ arena_t *arena_new(void){
     arena_t *fa = stack_pop_lookup(arena_t, sanc, &free_arenas);
     if(!fa){
         fa = mmap(NULL, ARENA_SIZE * ARENA_ALLOC_BATCH, PROT_READ | PROT_WRITE,
-                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                  MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if(!fa)
             return NULL;
         /* Note that we start from 1. */
@@ -289,8 +289,8 @@ void jump_through_hoop(void){
 };
 int register_thread_destructor(void){
     static __thread int destructor_rdy = 0;
-    pthread_once(&key_rdy, jump_through_hoop);
     if(!destructor_rdy){
+        pthread_once(&key_rdy, jump_through_hoop);
         if(pthread_setspecific(destructor_key, (void*) !NULL))
             return -1;
         destructor_rdy = 1;
