@@ -49,15 +49,21 @@ typedef struct{
 
 #define FOR_EACH_SPOPALL_LOOKUP(cur_struct, tmp, struct_type, field_name, stack) \
     for(                                                                \
-        ((cur_struct = lookup_sanchor(stack_pop_all(stack),             \
-                                      struct_type,                      \
-                                      field_name)) != NULL)             \
-        && (printf("%p", cur_struct),                                   \
-            (tmp = lookup_sanchor(cur_struct->field_name.next,          \
-                                 struct_type,                           \
-                                  field_name)));                        \
+        (cur_struct = lookup_sanchor(stack_pop_all(stack),              \
+                                     struct_type,                       \
+                                     field_name))                       \
+            , (tmp = cur_struct ?                                       \
+               lookup_sanchor(cur_struct->field_name.next,              \
+                              struct_type,                              \
+                              field_name)                               \
+               : NULL);                                                 \
         cur_struct != NULL;                                             \
         cur_struct = tmp                                                \
+            , (tmp = cur_struct ?                                       \
+               lookup_sanchor(cur_struct->field_name.next,              \
+                              struct_type,                              \
+                              field_name)                               \
+               : NULL)                                                  \
         )                                                               \
 
 

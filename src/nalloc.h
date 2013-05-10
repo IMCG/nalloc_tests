@@ -127,7 +127,6 @@ void *merge_adjacent(block_t *b);
 
 void return_wayward_block(wayward_block_t *b, arena_t *arena);
 used_block_t *alloc_from_wayward_blocks(size_t size);
-void free_arenas_atexit(void);
 
 void block_init(block_t *b, size_t size, size_t l_size);
 int supports_alignment(block_t *b, size_t enough, size_t alignment);
@@ -137,6 +136,9 @@ blist_t *blist_larger_than(size_t size);
 
 block_t *r_neighbor(block_t *b);
 block_t *l_neighbor(block_t *b);
+
+void free_arenas_atexit();
+int register_thread_destructor(void);
 
 arena_t *arena_of(block_t *b);
 int is_junk_block(block_t *b);

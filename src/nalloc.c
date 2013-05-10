@@ -37,6 +37,10 @@ __thread list_t priv_arenas = INITIALIZED_LIST;
 __thread blist_t blists[NBLISTS];
 __thread lfstack_t priv_wayward_blocks = INITIALIZED_STACK;
 
+/* Accounting info for pthread's insane thread destructor setup. */
+static pthread_once_t key_rdy = PTHREAD_ONCE_INIT;
+static pthread_key_t destructor_key = 0;
+
 void *nmalloc(size_t size){
     trace2(size, lu);
     used_block_t *found = alloc(umax(align_up_pow2(size + sizeof(used_block_t),
@@ -98,15 +102,17 @@ used_block_t *alloc(size_t size){
     assert(size <= MAX_BLOCK);
     assert(size >= MIN_BLOCK);
 
+    register_thread_destructor();
+
     used_block_t *found;
 
-    /* for(blist_t *b = blist_larger_than(size); b < &blists[NBLISTS]; b++) */
-    /*     if( (found = alloc_from_blist(size, b)) ) */
-    /*         goto done; */
+    for(blist_t *b = blist_larger_than(size); b < &blists[NBLISTS]; b++)
+        if( (found = alloc_from_blist(size, b)) )
+            goto done;
 
-    /* found = alloc_from_wayward_blocks(size); */
-    /* if(found) */
-    /*     goto done; */
+    found = alloc_from_wayward_blocks(size);
+    if(found)
+        goto done;
     
     arena_t *a = arena_new();
     if(!a)
@@ -223,19 +229,10 @@ used_block_t *alloc_from_wayward_blocks(size_t size){
     {
         if(!found && b->size >= size)
             found = (used_block_t *) b;
-        /* dealloc((used_block_t *) b); */
+        else
+            dealloc((used_block_t *) b);
     }
     return found;
-}
-
-void free_arenas_atexit(void){
-    /* TODO: Obvious placeholder. */
-    for(int i = 0; i < NBLISTS; i++){
-        arena_t *cur;
-        FOR_EACH_LLOOKUP(cur, arena_t, lanc, &priv_arenas)
-            cur->wayward_blocks = &cur->disowned_blocks;
-    }
-        
 }
 
 blist_t *blist_larger_than(size_t size){
@@ -280,6 +277,28 @@ int is_junk_block(block_t *b){
     return b->size < MIN_BLOCK;
 }
 
+void free_arenas_atexit(){
+    /* TODO: Obvious placeholder. */
+    arena_t *cur;
+    FOR_EACH_LLOOKUP(cur, arena_t, lanc, &priv_arenas)
+        cur->wayward_blocks = &cur->disowned_blocks;
+}
+
+void jump_through_hoop(void){
+    pthread_key_create(&destructor_key, free_arenas_atexit);
+};
+int register_thread_destructor(void){
+    static __thread int destructor_rdy = 0;
+    pthread_once(&key_rdy, jump_through_hoop);
+    if(!destructor_rdy){
+        if(pthread_setspecific(destructor_key, (void*) !NULL))
+            return -1;
+        destructor_rdy = 1;
+    }
+    return 0;
+}
+
+
 int free_block_valid(block_t *b){
     assert(block_magics_valid(b));
     assert(b->size >= MIN_BLOCK);
@@ -294,6 +313,7 @@ int free_block_valid(block_t *b){
 
 int used_block_valid(used_block_t *_b){
     block_t *b = (block_t *) _b;
+    assert(b);
     assert(b->size >= MIN_BLOCK);
     assert(b->size <= MAX_BLOCK);
     assert(aligned(_b->data, MIN_ALIGNMENT));
