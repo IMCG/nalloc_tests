@@ -37,16 +37,27 @@ typedef void *(entrypoint_t)(void *);
 /* #define NUM_MALLOC_TESTERS 1000 */
 #define NUM_MALLOC_TESTERS 8
 #define NUM_ALLOCATIONS 1000
-#define NUM_OPS 200 * NUM_ALLOCATIONS
-#define MAX_WRITES  0
+#define NUM_OPS 1000 * NUM_ALLOCATIONS
+#define MAX_WRITES  1000
 #define REPORT_INTERVAL 100
 #define MAX_SIZE 128
 #define SIZE1 12
 #define SIZE2 16
 
+#define NUM_STACKS 32
+
 /* Fun fact: without the volatile, a test-yield loop on rdy will optimize the
    test part and will just yield in a loop forever. Thanks, GCC! */
 static volatile int rdy;
+
+typedef struct{
+    union{
+        lanchor_t lanc;
+        sanchor_t sanc;
+    };
+    size_t size;
+    int magics[];
+} tblock_t;
 
 static __thread unsigned int seed;
 void prand_init(void){
@@ -64,182 +75,115 @@ int rand_percent(int per_centum){
 
 void mt_child(int parent_tid);
 
-void malloc_test(void){
-    trace();
-    int status = 0;
-    int ret = 0;
-    int i;
+/* void malloc_test(void){ */
+/*     trace(); */
+/*     int status = 0; */
+/*     int ret = 0; */
+/*     int i; */
 
-    (void) ret;
-    (void) status;
+/*     (void) ret; */
+/*     (void) status; */
 
-    pthread_t kids[NUM_MALLOC_TESTERS];
+/*     pthread_t kids[NUM_MALLOC_TESTERS]; */
 
-    for(i = 0; i < NUM_MALLOC_TESTERS; i++){
-        if(kfork((entrypoint_t *) mt_child, (void *) _gettid(), KERN_ONLY) < 0)
-            LOGIC_ERROR("Failed to fork.");
-    }
+/*     for(i = 0; i < NUM_MALLOC_TESTERS; i++){ */
+/*         if(kfork((entrypoint_t *) mt_child, (void *) _gettid(), KERN_ONLY) < 0) */
+/*             LOGIC_ERROR("Failed to fork."); */
+/*     } */
 
-    rdy = TRUE;
+/*     rdy = TRUE; */
 
-    for(i = 0; i < NUM_MALLOC_TESTERS; i++)
-        assert(!pthread_join(kids[i], (void *[]){NULL}));
-}
+/*     for(i = 0; i < NUM_MALLOC_TESTERS; i++) */
+/*         assert(!pthread_join(kids[i], (void *[]){NULL})); */
+/* } */
 
-/* #define test_free(x) pfree(x, size, size == SIZE1 ? &pool1 : &pool2) */
-/* #define test_malloc(x) pwsmalloc(x, size == SIZE1 ? &pool1 : &pool2) */
-#define test_free(x) wsfree(x, size)
-#define test_malloc(x) wsmalloc(x)
+/* void mt_child_rand(int parent_tid); */
 
-/* Note: can be used to test speed of malloc too. How many times do you manage
-   to go into the allocator before being preempted? */
-void mt_child(int parent_tid){
-    int *blocks[NUM_ALLOCATIONS];
-    int size = (_gettid() % 2) ? SIZE1 : SIZE2;
-    volatile int allocated = 0;
-    int malloc_prob;
-    volatile int i, j;
-    int jid = _gettid();
+/* void malloc_test_randsize(){ */
+/*     trace(); */
+/*     int status = 0; */
+/*     int ret = 0; */
+/*     int i; */
 
-    UNIMPLEMENTED("Get rid of the stack");
+/*     (void) ret; */
+/*     (void) status; */
 
-    while(rdy == FALSE)
-        _yield(parent_tid);
+/*     pthread_t kids[NUM_MALLOC_TESTERS]; */
+/*     for(i = 0; i < NUM_MALLOC_TESTERS; i++) */
+/*         assert(!kfork((entrypoint_t *) mt_child_rand, */
+/*                       (void *) _gettid(), KERN_ONLY)); */
     
-    for(i = 0; i < NUM_OPS; i++){
-        if(allocated > 0 && allocated % REPORT_INTERVAL == 0)
-            log2("i:%d allocated:%d", i, allocated);
+/*     rdy = TRUE; */
+
+/*     for(i = 0; i < NUM_MALLOC_TESTERS; i++) */
+/*         assert(!pthread_join(kids[i], (void *[]){NULL})); */
+/* } */
+
+/* void mt_child_rand(int parent_tid){ */
+/*     trace2(parent_tid, d); */
+    
+/*     list_t blocks = INITIALIZED_LIST; */
+/*     int jid = _gettid(); */
+/*     prand_init(); */
+
+/*     while(rdy == FALSE) */
+/*         _yield(parent_tid); */
+
+/*     for(int i = 0; i < NUM_OPS; i++){ */
+/*         int size; */
+/*         int malloc_prob = */
+/*             blocks.size < NUM_ALLOCATIONS/2 ? 75 : */
+/*             blocks.size < NUM_ALLOCATIONS ? 50 : */
+/*             blocks.size < NUM_ALLOCATIONS * 2 ? 25 : */
+/*             0; */
         
-        if(allocated == NUM_ALLOCATIONS)
-            test_free(blocks[--allocated]);
+/*         if(blocks.size > 0 && blocks.size % REPORT_INTERVAL == 0) */
+/*             log2("i:%d allocated:%d", i, blocks.size); */
 
-        if(allocated >= NUM_ALLOCATIONS/2)
-            malloc_prob = 50;
-        else
-            malloc_prob = 75;
-        
-        if(rand_percent(malloc_prob)){
-            if( (blocks[allocated++] = test_malloc(size)) == NULL)
-                LOGIC_ERROR("We shouldn't have run out of space.");
-            for(j = 0; j < size/sizeof(int); j++)
-                blocks[allocated - 1][j] = jid;
-        }
-        else if(allocated > 0){
-            for(j = 0; j < size/sizeof(int); j++)
-                assert(blocks[allocated - 1][j] == jid);
-            test_free(blocks[--allocated]);
-        }
-    }
+/*         if(rand_percent(malloc_prob)){ */
+/*             size = prand() % (MAX_SIZE); */
+/*             cur_block = wsmalloc(size); */
+/*             if(!cur_block) */
+/*                 continue; */
+/*             *cur_block = (tblock_t) */
+/*                 { . size = size, .lanc = INITIALIZED_LANCHOR }; */
+/*             /\* Why doesn't this cause corruption if size isn't int aligned? *\/ */
+/*             for(int *m = cur_block->magics; */
+/*                 (uptr_t) m < (uptr_t) cur_block + */
+/*                     umin(size, MAX_WRITES); */
+/*                 m++) */
+/*                 *m = jid; */
+/*             list_add_rear(&cur_block->lanc, &blocks); */
+/*         }else if(blocks.size){ */
+/*             cur_block = */
+/*                 lookup_lanchor(list_nth(prand() % blocks.size, */
+/*                                         &blocks), */
+/*                                tblock_t, lanc); */
+/*             if(!cur_block) */
+/*                 continue; */
+/*             list_remove(&cur_block->lanc, &blocks); */
+/*             for(int *m = cur_block->magics; */
+/*                 (uptr_t) m < (uptr_t) cur_block + */
+/*                     umin(cur_block->size, MAX_WRITES); */
+/*                 m++) */
+/*                 assert(*m == jid); */
+/*             wsfree(cur_block, cur_block->size); */
+/*         } */
+/*     } */
 
-    /* Clean up. */
-    for(i = 0; i < allocated; i++){
-        test_free(blocks[i]);
-    }
+/*     FOR_EACH_LLOOKUP(cur_block, struct block_t, lanc, &blocks){ */
+/*         /\* Hacky way to make the iteration safe after freeing. *\/ */
+/*         struct block_t local_copy = *cur_block; */
+/*         wsfree(cur_block, cur_block->size); */
+/*         cur_block = &local_copy; */
+/*     } */
 
-    report_profile();
-    /* exit(_gettid()); */
-}
-
-void mt_child_rand(int parent_tid);
-
-void malloc_test_randsize(){
-    trace();
-    int status = 0;
-    int ret = 0;
-    int i;
-
-    (void) ret;
-    (void) status;
-
-    pthread_t kids[NUM_MALLOC_TESTERS];
-    for(i = 0; i < NUM_MALLOC_TESTERS; i++)
-        assert(!kfork((entrypoint_t *) mt_child_rand,
-                      (void *) _gettid(), KERN_ONLY));
-    
-    rdy = TRUE;
-
-    for(i = 0; i < NUM_MALLOC_TESTERS; i++)
-        assert(!pthread_join(kids[i], (void *[]){NULL}));
-}
-
-void mt_child_rand(int parent_tid){
-    trace2(parent_tid, d);
-    
-    list_t blocks = INITIALIZED_LIST;
-    int jid = _gettid();
-    prand_init();
-    
-    struct block_t{
-        lanchor_t lanc;
-        int size;
-        int magics[];
-    } *cur_block;
-
-    while(rdy == FALSE)
-        _yield(parent_tid);
-
-    for(int i = 0; i < NUM_OPS; i++){
-        int size;
-        int malloc_prob =
-            blocks.size < NUM_ALLOCATIONS/2 ? 75 :
-            blocks.size < NUM_ALLOCATIONS ? 50 :
-            blocks.size < NUM_ALLOCATIONS * 2 ? 25 :
-            0;
-        
-        if(blocks.size > 0 && blocks.size % REPORT_INTERVAL == 0)
-            log2("i:%d allocated:%d", i, blocks.size);
-
-        if(rand_percent(malloc_prob)){
-            size = prand() % (MAX_SIZE);
-            cur_block = wsmalloc(size);
-            if(!cur_block)
-                continue;
-            *cur_block = (struct block_t)
-                { . size = size, .lanc = INITIALIZED_LANCHOR };
-            /* Why doesn't this cause corruption if size isn't int aligned? */
-            for(int *m = cur_block->magics;
-                (uptr_t) m < (uptr_t) cur_block +
-                    umin(size, MAX_WRITES);
-                m++)
-                *m = jid;
-            list_add_rear(&cur_block->lanc, &blocks);
-        }else if(blocks.size){
-            cur_block =
-                lookup_lanchor(list_nth(prand() % blocks.size,
-                                        &blocks),
-                               struct block_t, lanc);
-            if(!cur_block)
-                continue;
-            list_remove(&cur_block->lanc, &blocks);
-            for(int *m = cur_block->magics;
-                (uptr_t) m < (uptr_t) cur_block +
-                    umin(cur_block->size, MAX_WRITES);
-                m++)
-                assert(*m == jid);
-            wsfree(cur_block, cur_block->size);
-        }
-    }
-
-    FOR_EACH_LLOOKUP(cur_block, struct block_t, lanc, &blocks){
-        /* Hacky way to make the iteration safe after freeing. */
-        struct block_t local_copy = *cur_block;
-        wsfree(cur_block, cur_block->size);
-        cur_block = &local_copy;
-    }
-
-    report_profile();
-    /* exit(_gettid()); */
-}
+/*     report_profile(); */
+/*     /\* exit(_gettid()); *\/ */
+/* } */
 
 void mt_sharing_child();
 
-struct block_t{
-    sanchor_t sanc;
-    int size;
-    int magics[];
-};
-
-#define NUM_STACKS 8
 void malloc_test_sharing(){
     trace();
     int status = 0;
@@ -267,8 +211,8 @@ void malloc_test_sharing(){
 
     for(int i = 0; i < NUM_STACKS; i++){
         lfstack_t *blocks = &shared.block_stacks[i];
-        struct block_t *cur_block;
-        FOR_EACH_SPOP_LOOKUP(cur_block, struct block_t, sanc, blocks)
+        tblock_t *cur_block;
+        FOR_EACH_SPOP_LOOKUP(cur_block, tblock_t, sanc, blocks)
             wsfree(cur_block, cur_block->size);
     }
 }
@@ -278,8 +222,8 @@ void mt_sharing_child(
 {
     int parent_tid = shared->parent_tid;
     int jid = _gettid();
-    struct block_t *cur_block;
     prand_init();
+    tblock_t *cur_block;
 
     while(rdy == FALSE)
         _yield(parent_tid);
@@ -303,7 +247,7 @@ void mt_sharing_child(
             if(!cur_block)
                 continue;
             log2("Allocated: %p", cur_block);
-            *cur_block = (struct block_t)
+            *cur_block = (tblock_t)
                 { .size = size, .sanc = INITIALIZED_SANCHOR };
             /* Try to trigger false sharing. */
             for(volatile int *m = cur_block->magics;
@@ -312,7 +256,7 @@ void mt_sharing_child(
             stack_push(&cur_block->sanc, blocks);
         }else if(blocks->size){
             cur_block =
-                stack_pop_lookup(struct block_t, sanc, blocks);
+                stack_pop_lookup(tblock_t, sanc, blocks);
             if(cur_block){
                 log2("Claiming: %p", cur_block);
                 PINT(cur_block->size);
@@ -329,7 +273,7 @@ void mt_sharing_child(
 
         if(rand_percent(50)){
             cur_block =
-                stack_pop_lookup(struct block_t, sanc, &priv_blocks);
+                stack_pop_lookup(tblock_t, sanc, &priv_blocks);
             if(!cur_block)
                 continue;
             log2("Freeing priv: %p", cur_block);

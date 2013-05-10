@@ -40,7 +40,7 @@ __thread block_t dummy = { .free = 0, .size = MAX_BLOCK, .l_size = MAX_BLOCK };
 void *_nmalloc(size_t size){
     trace2(size, lu);
     used_block_t *found = alloc(ualign_up(size + sizeof(used_block_t),
-                                          MIN_BLOCK),
+                                          MIN_ALIGNMENT),
                                 MIN_ALIGNMENT);
     return found ? found + 1 : NULL;
 }

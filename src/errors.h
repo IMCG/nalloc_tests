@@ -56,51 +56,8 @@
 #define PRNT 1
 #define DBG 1
 
-#define E_VM 1, BRK, PRNT
-#define E_PAGES DBG, BRK, PRNT
-#define E_FRAMES DBG, BRK, PRNT
-#define E_FILES DBG, BRK, PRNT
-#define E_VM_CLASSES DBG, BRK, PRNT
-#define E_LIFECYCLE DBG, BRK, PRNT
-#define E_LOADER DBG, BRK, PRNT
-#define E_SCHED DBG, BRK, PRNT
-#define E_CONTEXT_SWITCH DBG, BRK, PRNT
-
-#define E_SYSCALL DBG, BRK, PRNT
-#define E_EXCEPT DBG, BRK, PRNT
-#define E_SWEXN DBG, BRK, PRNT
-#define E_ERRORS DBG, BRK, PRNT
-#define E_MODE_SWITCH DBG, BRK, PRNT
-
-#define E_CONSOLE_IO DBG, BRK, PRNT
-#define E_SYSCALL_ETC DBG, BRK, PRNT
-#define E_TIMER DBG, BRK, PRNT
-#define E_KEYBOARD DBG, BRK, PRNT
-#define E_CONSOLE DBG, BRK, PRNT
-
-#define E_MAIN DBG, BRK, PRNT
-#define E_UTIL DBG, BRK, PRNT
-#define E_PEBRAND DBG, BRK, PRNT
 #define E_NALLOC DBG, BRK, 2
-
-#define E_MUT 1, BRK, PRNT
-#define E_SEM 1, BRK, PRNT
-#define E_HAND 1, BRK, PRNT
-#define E_RWLOCK 1, BRK, PRNT
-#define E_REFCNT DBG, BRK, PRNT
-
-#define E_HASH DBG, BRK, PRNT
-#define E_LIST DBG, BRK, PRNT
-#define E_TREE DBG, BRK, PRNT
 #define E_STACK 1, BRK, PRNT
-
-#define E_TEST_HARNESS DBG, BRK, PRNT
-#define E_CONSISTENCY DBG, BRK, PRNT
-#define E_LEAKCHK DBG, BRK, PRNT
-#define E_POISON DBG, BRK, PRNT
-#define E_LMM DBG, BRK, PRNT
-#define E_KMALLOC DBG, BRK, PRNT
-#define E_POOLS DBG, BRK, PRNT
 #define E_UNIT_TESTS 3, BRK, 3
 
 /* #ifndef MODULE */
