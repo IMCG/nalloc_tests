@@ -26,23 +26,22 @@ typedef void *(entrypoint_t)(void *);
 #define kfork(entry, arg, flag)                 \
     pthread_create(&kids[i], NULL, entry, arg)  \
 
-#define wsmalloc(size) nmalloc(size)
-#define wsfree(ptr, size) nfree(ptr)
+/* #define wsmalloc(size) nmalloc(size) */
+/* #define wsfree(ptr, size) nfree(ptr) */
 
-/* #define wsmalloc malloc */
-/* #define wsfree(ptr, size) free(ptr) */
+#define wsmalloc malloc
+#define wsfree(ptr, size) free(ptr)
 
 #define report_profile() 
 
 /* #define NUM_MALLOC_TESTERS 1000 */
-#define NUM_MALLOC_TESTERS 8
+#define NUM_MALLOC_TESTERS 10
 #define NUM_ALLOCATIONS 1000
 #define NUM_OPS 1000 * NUM_ALLOCATIONS
-#define MAX_WRITES  1000
+#define MAX_WRITES  0
 #define REPORT_INTERVAL 100
 #define MAX_SIZE 128
-#define SIZE1 12
-#define SIZE2 16
+#define MIN_SIZE sizeof(tblock_t)
 
 #define NUM_STACKS 32
 
@@ -73,6 +72,20 @@ int rand_percent(int per_centum){
     return prand() % 100 <= per_centum;
 }
 
+void write_magics(tblock_t *b, int tid){
+    for(int i = 0;
+        i < min((b->size - sizeof(*b)) / sizeof(b->magics[0]), MAX_WRITES);
+        i++)
+        b->magics[i] = tid;
+}
+
+void check_magics(tblock_t *b, int tid){
+    for(int i = 0;
+        i < min((b->size - sizeof(*b)) / sizeof(b->magics[0]), MAX_WRITES);
+        i++)
+        rassert(b->magics[i], ==, tid);
+}
+
 /* void mt_child_rand(int parent_tid); */
 
 /* void malloc_test_randsize(){ */
@@ -99,7 +112,7 @@ int rand_percent(int per_centum){
 /*     trace2(parent_tid, d); */
     
 /*     list_t blocks = INITIALIZED_LIST; */
-/*     int jid = _gettid(); */
+/*     int tid = _gettid(); */
 /*     prand_init(); */
 
 /*     while(rdy == FALSE) */
@@ -128,7 +141,7 @@ int rand_percent(int per_centum){
 /*                 (uptr_t) m < (uptr_t) cur_block + */
 /*                     umin(size, MAX_WRITES); */
 /*                 m++) */
-/*                 *m = jid; */
+/*                 *m = tid; */
 /*             list_add_rear(&cur_block->lanc, &blocks); */
 /*         }else if(blocks.size){ */
 /*             cur_block = */
@@ -142,7 +155,7 @@ int rand_percent(int per_centum){
 /*                 (uptr_t) m < (uptr_t) cur_block + */
 /*                     umin(cur_block->size, MAX_WRITES); */
 /*                 m++) */
-/*                 assert(*m == jid); */
+/*                 assert(*m == tid); */
 /*             wsfree(cur_block, cur_block->size); */
 /*         } */
 /*     } */
@@ -158,48 +171,45 @@ int rand_percent(int per_centum){
 /*     /\* exit(_gettid()); *\/ */
 /* } */
 
-void mt_sharing_child();
+void *mt_sharing_child();
+
+struct sharing_child_args{
+    int parent_tid;
+    lfstack_t block_stacks[NUM_STACKS];
+};
 
 void malloc_test_sharing(){
     trace();
-    int status = 0;
-    int ret = 0;
-    int i;
 
-    struct{
-        int parent_tid;
-        lfstack_t block_stacks[NUM_STACKS];
-    } shared;
+    struct sharing_child_args shared;
     shared.parent_tid = _gettid();
     for(int i = 0; i < NUM_STACKS; i++)
         shared.block_stacks[i] = (lfstack_t) INITIALIZED_STACK;
 
     pthread_t kids[NUM_MALLOC_TESTERS];
-    for(i = 0; i < NUM_MALLOC_TESTERS; i++){
-        if(kfork((entrypoint_t *) mt_sharing_child, &shared, KERN_ONLY) < 0)
+    for(int i = 0; i < NUM_MALLOC_TESTERS; i++)
+        if(pthread_create(&kids[i], NULL, mt_sharing_child, (void *) &shared))
             LOGIC_ERROR("Failed to fork.");
-    }
 
     rdy = TRUE;
 
-    for(i = 0; i < NUM_MALLOC_TESTERS; i++)
+    for(int i = 0; i < NUM_MALLOC_TESTERS; i++)
         assert(!pthread_join(kids[i], (void *[]){NULL}));
 
-    for(int i = 0; i < NUM_STACKS; i++){
-        lfstack_t *blocks = &shared.block_stacks[i];
-        tblock_t *cur_block;
-        FOR_EACH_SPOP_LOOKUP(cur_block, tblock_t, sanc, blocks)
-            wsfree(cur_block, cur_block->size);
-    }
+    /* for(int i = 0; i < NUM_STACKS; i++){ */
+    /*     lfstack_t *blocks = &shared.block_stacks[i]; */
+    /*     tblock_t *cur_block; */
+    /*     FOR_EACH_SPOP_LOOKUP(cur_block, tblock_t, sanc, blocks) */
+    /*         wsfree(cur_block, cur_block->size); */
+    /* } */
 }
 
-void mt_sharing_child(
-    struct{int parent_tid; lfstack_t block_stacks[NUM_STACKS];} *shared)
-{
-    int parent_tid = shared->parent_tid;
-    int jid = _gettid();
-    prand_init();
+void *mt_sharing_child(struct sharing_child_args *shared){
     tblock_t *cur_block;
+
+    int parent_tid = shared->parent_tid;
+    int tid = _gettid();
+    prand_init();
 
     while(rdy == FALSE)
         _yield(parent_tid);
@@ -213,12 +223,9 @@ void mt_sharing_child(
             blocks->size < NUM_ALLOCATIONS ? 50 :
             blocks->size < NUM_ALLOCATIONS * 2 ? 25 :
             0;
-        
-        if(blocks->size > 0 && blocks->size % REPORT_INTERVAL == 0)
-            log2("i:%d allocated:%d", i, blocks->size);
 
         if(rand_percent(malloc_prob)){
-            size = prand() % (MAX_SIZE);
+            size = (MIN_SIZE + prand()) % MAX_SIZE;
             cur_block = wsmalloc(size);
             if(!cur_block)
                 continue;
@@ -226,25 +233,16 @@ void mt_sharing_child(
             *cur_block = (tblock_t)
                 { .size = size, .sanc = INITIALIZED_SANCHOR };
             /* Try to trigger false sharing. */
-            for(volatile int *m = cur_block->magics;
-                (uptr_t) m < (uptr_t) cur_block + umin(size, MAX_WRITES); m++)
-                *m = jid;
+            /* write_magics(cur_block, tid); */
             stack_push(&cur_block->sanc, blocks);
         }else if(blocks->size){
             cur_block =
                 stack_pop_lookup(tblock_t, sanc, blocks);
-            if(cur_block){
-                log2("Claiming: %p", cur_block);
-                PINT(cur_block->size);
-                for(int *m = cur_block->magics;
-                    (uptr_t) m < (uptr_t) cur_block + umin(cur_block->size,
-                                                           MAX_WRITES);
-                    m++)
-                {
-                    *m = jid;
-                }
-                stack_push(&cur_block->sanc, &priv_blocks);
-            }
+            if(!cur_block)
+                continue;
+            log2("Claiming: %p", cur_block);
+            /* write_magics(cur_block, tid); */
+            stack_push(&cur_block->sanc, &priv_blocks);
         }
 
         if(rand_percent(50)){
@@ -253,18 +251,12 @@ void mt_sharing_child(
             if(!cur_block)
                 continue;
             log2("Freeing priv: %p", cur_block);
-            for(int *m = cur_block->magics;
-                (uptr_t) m < (uptr_t) cur_block + umin(cur_block->size,
-                                                       MAX_WRITES);
-                m++)
-            {
-                rassert(*m, ==, jid);
-            }
+            /* check_magics(cur_block, tid); */
             wsfree(cur_block, cur_block->size);
         }
     }
 
-    report_profile();
+    /* report_profile(); */
     /* exit(_gettid()); */
 }
 
@@ -273,7 +265,6 @@ void *test(void *);
 #include <time.h>
 int main(){
     struct timespec start;
-    assert(!clock_gettime(CLOCK_MONOTONIC, &start));
     
     /* malloc_test(); */
     /* TIME(malloc_test_randsize()); */

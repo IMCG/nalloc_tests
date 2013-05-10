@@ -50,17 +50,6 @@ void nfree(void *buf){
     dealloc((used_block_t *) buf - 1);
 }
 
-void nsfree(void *buf, size_t size){
-    trace2(buf, p, size, lu);
-    if(size == PAGE_SIZE){
-        arena_free((arena_t *) buf);
-        return;
-    }
-    rassert(max(size + sizeof(used_block_t), MIN_BLOCK), <=,
-            ((used_block_t *) buf - 1)->size);
-    nfree(buf);
-}
-
 void block_init(block_t *b, size_t size, size_t l_size){
     b->size = size;
     b->free = 1;
