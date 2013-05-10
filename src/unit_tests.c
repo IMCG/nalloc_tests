@@ -26,8 +26,8 @@ typedef void *(entrypoint_t)(void *);
 #define kfork(entry, arg, flag)                 \
     pthread_create(&kids[i], NULL, entry, arg)  \
 
-#define wsmalloc _nsmalloc
-#define wsfree _nsfree
+#define wsmalloc(size) nmalloc(size)
+#define wsfree(ptr, size) nfree(ptr)
 
 /* #define wsmalloc malloc */
 /* #define wsfree(ptr, size) free(ptr) */
@@ -72,30 +72,6 @@ long int prand(void){
 int rand_percent(int per_centum){
     return prand() % 100 <= per_centum;
 }
-
-void mt_child(int parent_tid);
-
-/* void malloc_test(void){ */
-/*     trace(); */
-/*     int status = 0; */
-/*     int ret = 0; */
-/*     int i; */
-
-/*     (void) ret; */
-/*     (void) status; */
-
-/*     pthread_t kids[NUM_MALLOC_TESTERS]; */
-
-/*     for(i = 0; i < NUM_MALLOC_TESTERS; i++){ */
-/*         if(kfork((entrypoint_t *) mt_child, (void *) _gettid(), KERN_ONLY) < 0) */
-/*             LOGIC_ERROR("Failed to fork."); */
-/*     } */
-
-/*     rdy = TRUE; */
-
-/*     for(i = 0; i < NUM_MALLOC_TESTERS; i++) */
-/*         assert(!pthread_join(kids[i], (void *[]){NULL})); */
-/* } */
 
 /* void mt_child_rand(int parent_tid); */
 

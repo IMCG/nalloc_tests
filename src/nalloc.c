@@ -37,60 +37,20 @@ __thread list_t private_arenas = INITIALIZED_LIST;
 __thread blist_t blists[NBLISTS];
 __thread block_t dummy = { .free = 0, .size = MAX_BLOCK, .l_size = MAX_BLOCK };
 
-void *_nmalloc(size_t size){
+void *nmalloc(size_t size){
     trace2(size, lu);
-    used_block_t *found = alloc(ualign_up(size + sizeof(used_block_t),
-                                          MIN_ALIGNMENT),
-                                MIN_ALIGNMENT);
+    used_block_t *found = alloc(umax(align_up_pow2(size + sizeof(used_block_t),
+                                                   MIN_ALIGNMENT),
+                                     MIN_BLOCK));
     return found ? found + 1 : NULL;
 }
-
-/* void *_nmemalign(size_t alignment, size_t size){ */
-/*     trace2(alignment, lu, size, lu); */
-/*     used_block_t *found = alloc(size + sizeof(used_block_t), alignment); */
-/*     return found ? found + 1 : NULL; */
-/* } */
-
-/* void *_ncalloc(size_t nelt, size_t eltsize){ */
-/*     trace2(nelt, lu, eltsize, lu); */
-/*     uint8_t *new = _nmalloc(nelt * eltsize); */
-/*     if(new) */
-/*         for(int i = 0; i < nelt * eltsize; i++) */
-/*             new[i] = 0; */
-/*     return new; */
-/* } */
-
-/* void *_nrealloc(void *buf, size_t new_size){ */
-/*     trace2(buf, p, new_size, lu); */
-/*     void *new = _nmalloc(new_size); */
-/*     if(new && buf){ */
-/*         memcpy(new, buf, ((used_block_t *) buf - 1)->size); */
-/*         _nfree(buf); */
-/*     } */
-/*     return new; */
-/* } */
         
-void _nfree(void *buf){
+void nfree(void *buf){
     trace2(buf, p);
     dealloc((used_block_t *) buf - 1);
 }
 
-/* TODO: Obviously... */
-void *_nsmalloc(size_t size){
-    trace2(size, lu);
-    if(size == PAGE_SIZE)
-        return arena_new();
-    return _nmalloc(size);
-}
-
-/* void *_nsmemalign(size_t alignment, size_t size){ */
-/*     trace2(alignment, lu, size, lu); */
-/*     if(size == PAGE_SIZE && aligned(alignment, PAGE_SIZE)) */
-/*         return arena_new(); */
-/*     return _nmemalign(size, alignment); */
-/* } */
-
-void _nsfree(void *buf, size_t size){
+void nsfree(void *buf, size_t size){
     trace2(buf, p, size, lu);
     if(size == PAGE_SIZE){
         arena_free((arena_t *) buf);
@@ -98,7 +58,7 @@ void _nsfree(void *buf, size_t size){
     }
     rassert(max(size + sizeof(used_block_t), MIN_BLOCK), <=,
             ((used_block_t *) buf - 1)->size);
-    _nfree(buf);
+    nfree(buf);
 }
 
 void block_init(block_t *b, size_t size, size_t l_size){
@@ -112,7 +72,6 @@ void block_init(block_t *b, size_t size, size_t l_size){
 void free_arena_init(arena_t *a){
     trace4(a, p);
     *a = (arena_t) INITIALIZED_FREE_ARENA;
-    assert(write_arena_magics(a));
 }
 
 arena_t *arena_new(void){
@@ -141,17 +100,15 @@ void arena_free(arena_t *freed){
     stack_push(&freed->sanc, &free_arenas);
 }
 
-used_block_t *alloc(size_t size, size_t alignment){
-    trace2(size, lu, alignment, lu);
-    assert(alignment_valid(alignment));
+used_block_t *alloc(size_t size){
+    trace2(size, lu);
     assert(size <= MAX_BLOCK);
+    assert(size >= MAX_BLOCK);
 
     used_block_t *found;
-    
-    size = umax(size, MIN_BLOCK);
 
     for(blist_t *b = blist_larger_than(size); b < &blists[NBLISTS]; b++)
-        if( (found = alloc_from_blist(size, alignment, b)) )
+        if( (found = alloc_from_blist(size, b)) )
             goto done;
 
     absorb_all_wayward_blocks(&private_arenas);
@@ -160,72 +117,52 @@ used_block_t *alloc(size_t size, size_t alignment){
         return NULL;
 
     block_init(a->heap, MAX_BLOCK, MAX_BLOCK);
-    /* This will insert the shavings from found into the right blist. */
-    found = alloc_from_block(a->heap, size, alignment);
+    found = alloc_from_block(a->heap, size);
     
 done:
     assert(found);
     assert(found->size >= size);
-    assert(aligned(found->data, alignment));
+    assert(aligned(found->data, MIN_ALIGNMENT));
     return found;
 }
 
-used_block_t *alloc_from_blist(size_t enough, size_t alignment, blist_t *bl){
-    block_t *found;
-    FOR_EACH_LLOOKUP(found, block_t, lanc, &bl->blocks)
-    {
-        assert(free_block_valid(found));
-        if(supports_alignment(found, enough, alignment)){
-            list_remove(&found->lanc, &bl->blocks);
-            return alloc_from_block(found, enough, alignment);
-        }
-        /* Should only fail due to alignment issues. */
-        assert(alignment != MIN_ALIGNMENT);
-    }
-    return NULL;
-}
-
-int supports_alignment(block_t *b, size_t enough, size_t alignment){
-    used_block_t *ub = (used_block_t *) b;
-    return
-        ub->size - ptrdiff(align_up(&ub->data, alignment), &ub->data)
-        >= enough;
-}
-
-used_block_t *alloc_from_block(block_t *block, size_t size, size_t alignment){
-    used_block_t *shaved = shave(block, size, alignment);
+used_block_t *alloc_from_blist(size_t size, blist_t *bl){
+    block_t *b = list_pop_lookup(block_t, lanc, &bl->blocks);
+    if(!b)
+        return NULL;
+    used_block_t *shaved = shave(b, size);
     shaved->free = 0;
     return shaved;
 }
 
-used_block_t *shave(block_t *b, size_t enough, size_t alignment){
-    trace3(b,p,enough,lu,alignment,lu);
+used_block_t *alloc_from_block(block_t *b, size_t size){
 
-    /* Move max shaved space to front while preserving alignment. */
-    used_block_t *newb =
-        container_of(align_up(&((used_block_t *)b)->data, alignment),
-                     used_block_t, data);
-    newb = (used_block_t *)
-        ((uptr_t) newb + ualign_down(b->size - enough - ptrdiff(newb, b),
-                                     alignment));
+}
 
-    if((uptr_t) newb != (uptr_t) b){
-        newb->size = b->size - ptrdiff(newb, b);
+used_block_t *shave(block_t *b, size_t size){
+    trace3(b,p,size,lu);
+
+    used_block_t *newb;
+    size_t shavesize = b->size - size;
+    /* Induction: if b->data and b->size are MIN_ALIGNMENT aligned after arena
+       init, and all future allocation sizes are always MIN_ALIGNMENT aligned,
+       then newb->data and shavesize must be aligned too. */
+    newb = (used_block_t *) ((uptr_t) b + shavesize);
+
+    assert(aligned(shavesize, MIN_ALIGNMENT));
+
+    if(shavesize){
+        newb->size = b->size - shavesize;
 
         r_neighbor((block_t *) newb)->l_size = newb->size;
-        newb->l_size = b->size -= newb->size;
+        newb->l_size = b->size = shavesize;
 
         log("Split - %p:%u | %p:%u", b, b->size, newb, newb->size);
 
-        /* So chunks of mem at the front that are not large enough to contain
-           a block_t are essentially leaked until their neighbors coalesce
-           with them. */
-        if(ptrdiff(newb, b) >= MIN_BLOCK)
-            list_add_front(&b->lanc,
-                           &blist_smaller_than(b->size)->blocks);
+        list_add_front(&b->lanc,
+                       &blist_smaller_than(b->size)->blocks);
     }
     
-    assert(aligned(&newb->data, alignment));
     return newb;
 }
 
@@ -236,8 +173,9 @@ void dealloc(used_block_t *_b){
     arena_t *arena = arena_of(b);
     if(arena->owner == pthread_self()){
         b = merge_adjacent(b);
-        block_init(b, b->size, b->l_size);
-
+        b->free = 1;
+        assert(write_block_magics(b));
+            
         if(b->size == MAX_BLOCK && private_arenas.size > IDEAL_FULL_ARENAS)
             arena_free(arena);
         else
@@ -315,100 +253,67 @@ blist_t *blist_smaller_than(size_t size){
 
 block_t *l_neighbor(block_t *b){
     if((uptr_t) b == (uptr_t) arena_of(b)->heap)
-        return &dummy;
+        return NULL;
     return (block_t *) ((uptr_t) b - b->l_size);
 }
 
 block_t *r_neighbor(block_t *b){
     arena_t *a = arena_of(b);
-    if((uptr_t) b + b->size == (uptr_t) a + ARENA_SIZE)
-        return &dummy;
+    if((uptr_t) b + b->size == (uptr_t) a + MAX_BLOCK)
+        return NULL;
     return (block_t *) ((uptr_t) b + b->size);
 }
 
 arena_t *arena_of(block_t *b){
-    return (arena_t *) align_down(b, PAGE_SIZE);
+    return (arena_t *) align_down_pow2(b, PAGE_SIZE);
 }
 
 int free_block_valid(block_t *b){
     assert(block_magics_valid(b));
     assert(b->size >= MIN_BLOCK);
     assert(b->size <= MAX_BLOCK);
-    rassert(l_neighbor(b)->size, ==, b->l_size);
-    assert(r_neighbor(b)->l_size == b->size || r_neighbor(b) == &dummy);
+    assert(!l_neighbor(b) || l_neighbor(b)->size == b->l_size);
+    assert(!r_neighbor(b) || r_neighbor(b)->l_size == b->size);
     assert(lanchor_valid(&b->lanc,
                          &blist_smaller_than(b->size)->blocks));
-    if(l_neighbor(b) == &dummy)
-        assert(b->l_size == MAX_BLOCK);
     assert(dummy.size == MAX_BLOCK);
     
     return 1;
 }
 
-int used_block_valid(used_block_t *b){
+int used_block_valid(used_block_t *_b){
+    block_t *b = (block_t *) _b;
     assert(b->size >= MIN_BLOCK);
     assert(b->size <= MAX_BLOCK);
-    assert(aligned(b->data, MIN_ALIGNMENT));
-    rassert(l_neighbor((block_t*) b)->size, ==, b->l_size);
-    assert(r_neighbor((block_t*) b)->l_size == b->size ||
-           r_neighbor((block_t*) b) == &dummy);
+    assert(aligned(_b->data, MIN_ALIGNMENT));
+    assert(!l_neighbor(b) || l_neighbor(b)->size == b->l_size);
+    assert(!r_neighbor(b) || r_neighbor(b)->l_size == b->size);
     assert(dummy.size == MAX_BLOCK);
 
     return 1;
 }
 
 int write_block_magics(block_t *b){
-    b->magics[0] = NALLOC_MAGIC_INT;
     if(!HEAP_DBG)
         return 1;
-    for(int *m = &b->magics[0]; m < (int*)((uptr_t)b + b->size); m++)
-        *m = NALLOC_MAGIC_INT;
-    /* Just so that this can be wrapped in assert(). */
+    for(int i = 0; i < (b->size - sizeof(*b)) / sizeof(*b->magics); i++)
+        b->magics[i] = NALLOC_MAGIC_INT;
     return 1;
 }
 
 int block_magics_valid(block_t *b){
-    assert((b->magics[0] = NALLOC_MAGIC_INT, 1));
     if(!HEAP_DBG)
         return 1;
-    for(int *m = &b->magics[0]; m < (int*)((uptr_t)b + b->size); m++)
-        assert(*m = NALLOC_MAGIC_INT);
+    for(int i = 0; i < (b->size - sizeof(*b)) / sizeof(*b->magics); i++)
+        rassert(b->magics[i], ==, NALLOC_MAGIC_INT);
     return 1;
 }
 
 int free_arena_valid(arena_t *a){
     /* assert(sanchor_valid(&a->sanc)); */
-    assert(arena_magics_valid(a));
     return 1;
 }
 
 int used_arena_valid(arena_t *a){
-    return 1;
-}
-
-int write_arena_magics(arena_t *a){
-    int *magics = (int *) a->heap;
-    magics[0] = 1;
-    if(!ARENA_DBG)
-        return 1;
-    assert(aligned(ARENA_SIZE - offsetof(arena_t, heap), sizeof(int)));
-    for(int i = 1; i < ARENA_SIZE/sizeof(int); i++)
-        magics[i] = ARENA_MAGIC_INT;
-    return 1;
-}
-
-int arena_magics_valid(arena_t *a){
-    int *magics = (int *) a->heap;
-    assert(magics[0] == ARENA_MAGIC_INT);
-    if(!ARENA_DBG)
-        return 1;
-    for(int i = 1; i < ARENA_SIZE/sizeof(int); i++)
-        assert(magics[i] == ARENA_MAGIC_INT);
-    return 1;
-}
-
-int alignment_valid(int alignment){
-    /* TODO */
-    assert(alignment == MIN_ALIGNMENT || alignment == PAGE_SIZE);
     return 1;
 }

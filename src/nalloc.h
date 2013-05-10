@@ -100,15 +100,8 @@ typedef struct{
     void *data[];
 } wayward_block_t;
 
-void *_nmalloc(size_t size);
-/* void *_nmemalign(size_t alignment, size_t size); */
-/* void *_ncalloc(size_t nelt, size_t eltsize); */
-/* void *_nrealloc(void *buf, size_t new_size); */
-void _nfree(void *buf);
-
-void *_nsmalloc(size_t size);
-void *_nsmemalign(size_t alignment, size_t size);
-void _nsfree(void *buf, size_t size);
+void *nmalloc(size_t size);
+void nfree(void *buf);
 
 void nalloc_init(void);
 arena_t *arena_new(void);
@@ -116,10 +109,10 @@ void arena_free(arena_t *arena);
 void free_arena_init(arena_t *a);
 void arena_init(arena_t *arena);
 
-used_block_t *alloc(size_t size, size_t alignment);
-used_block_t *alloc_from_blist(size_t enough, size_t alignment, blist_t *bl);
-used_block_t *alloc_from_block(block_t *block, size_t size, size_t alignment);
-used_block_t *shave(block_t *b, size_t enough, size_t alignment);
+used_block_t *alloc(size_t size);
+used_block_t *alloc_from_blist(size_t enough, blist_t *bl);
+used_block_t *alloc_from_block(block_t *block, size_t size);
+used_block_t *shave(block_t *b, size_t enough);
 
 void dealloc(used_block_t *_b);
 void *merge_adjacent(block_t *b);
@@ -140,14 +133,10 @@ block_t *l_neighbor(block_t *b);
 
 int free_arena_valid(arena_t *a);
 int used_arena_valid(arena_t *a);
-int write_arena_magics(arena_t *a);
-int arena_magics_valid(arena_t *a);
 
 int free_block_valid(block_t *b);
 int used_block_valid(used_block_t *b);
 int write_block_magics(block_t *b);
 int block_magics_valid(block_t *b);
-
-int alignment_valid(int alignment);
    
 #endif

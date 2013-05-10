@@ -12,20 +12,54 @@
 
 #include <peb_macros.h>
 
-#include <time.h>
+/* Aladdin system doesn't have librt installed. I'm sick of wrangling with the
+   loader. */
+/* #include <time.h> */
+/* #define TIME(expr)                                                      \ */
+/*     do{                                                                 \ */
+/*         struct timespec __tstart;                                       \ */
+/*         clock_gettime(CLOCK_MONOTONIC, &__tstart);                      \ */
+/*         expr;                                                           \ */
+/*         struct timespec __tend;                                         \ */
+/*         clock_gettime(CLOCK_MONOTONIC, &__tend);                        \ */
+/*         log(#expr ": %f ms", 1000 * (__tend.tv_sec - __tstart.tv_sec) + \ */
+/*             (double) (__tend.tv_nsec - __tstart.tv_nsec) / 1000000.0);  \ */
+/*     }while(0)                                                       \ */
+
+#include <sys/time.h>
+#include <sys/resource.h>
 #define TIME(expr)                                                      \
     do{                                                                 \
-        struct timespec __tstart;                                       \
-        clock_gettime(CLOCK_MONOTONIC, &__tstart);                      \
-        expr;                                                           \
-        struct timespec __tend;                                         \
-        clock_gettime(CLOCK_MONOTONIC, &__tend);                        \
-        log(#expr ": %f ms", 1000 * (__tend.tv_sec - __tstart.tv_sec) + \
-            (double) (__tend.tv_nsec - __tstart.tv_nsec) / 1000000.0);  \
+       struct rusage r;                                                 \
+       getrusage(RUSAGE_SELF, &r);                                      \
+       struct timeval __tstart = r.ru_utime;                            \
+       expr;                                                            \
+       getrusage(RUSAGE_SELF, &r);                                      \
+       struct timeval __tend = r.ru_utime;                              \
+       log(#expr ": %lu ms", 1000 * (__tend.tv_sec - __tstart.tv_sec) +  \
+           (__tend.tv_usec - __tstart.tv_usec) / 1000);                 \
     }while(0)                                                       \
-    
+
+
+/* #include <sys/time.h> */
+/* #include <sys/resource.h> */
+/* #define TIME(expr)                                                      \ */
+/*     do{                                                                 \ */
+/*        struct timeval __tstart;                                         \ */
+/*        gettimeofday(&__tstart, NULL);                                   \ */
+/*        expr;                                                            \ */
+/*        struct timeval __tend;                                           \ */
+/*        gettimeofday(&__tend, NULL);                                     \ */
+/*        log(#expr ": %lu ms", 1000 * (__tend.tv_sec - __tstart.tv_sec) +  \ */
+/*            (__tend.tv_usec - __tstart.tv_usec) / 1000);                 \ */
+/*     }while(0)                                                       \ */
+
+
 #define printf_ln(...)                                                  \
     printf(FIRST_ARG(__VA_ARGS__) "\n" COMMA_AND_TAIL_ARGS(__VA_ARGS__))
+
+#define is_power_of_2(num)                      \
+    (num && !(num & (num - 1)))                 \
 
 static inline int max(int a, int b){
     return a >= b ? a : b;
@@ -33,11 +67,11 @@ static inline int max(int a, int b){
 static inline int min(int a, int b){
     return a < b ? a : b;
 }
-#define umax(a, b) _umax((uintptr_t) a,(uintptr_t) b)
-static inline uintptr_t _umax(uintptr_t a, uintptr_t b){
+#define umax(a, b) _umax((uintptr_t) (a),(uintptr_t) (b))
+static inline uintptr_t _umax(uintptr_t (a), uintptr_t (b)){
     return a >= b ? a : b;
 }
-#define umin(a, b) _umin((uintptr_t) a,(uintptr_t) b)
+#define umin(a, b) _umin((uintptr_t) (a),(uintptr_t) (b))
 static inline uintptr_t _umin(uintptr_t a, uintptr_t b){
     return a < b ? a : b;
 }
@@ -46,21 +80,39 @@ static inline uintptr_t _umin(uintptr_t a, uintptr_t b){
     (((uintptr_t)(addr) % (size)) == 0)
 
 #define align_down(addr, size)                              \
-    ualign_down((uintptr_t) addr, size)
-
+    ualign_down((uintptr_t) (addr), (size))
 static inline uintptr_t ualign_down(uintptr_t addr, size_t size){
     return addr - addr % size;
 }
 
 #define align_up(addr, size)                    \
-    (void *) ualign_up((uintptr_t) addr, size)
+    (void *) ualign_up((uintptr_t) (addr), (size))
 
 static inline uintptr_t ualign_up(uintptr_t addr, size_t size){
     return ualign_down(addr + size - 1, size);
 }
 
-#define uptr_add(addr, addend)                  \
-    (uintptr_t) addr + addend
+
+/* COMPILE_ASSERT doesn't like using the ualign_*() functions because they're
+   not integer constants.
+   DANGER: up to the programmer to make sure that double-eval of addr is safe.*/
+#define const_align_down_pow2(n, size)          \
+    ((n) & ~((size) - 1))
+
+#define const_align_up_pow2(n, size)         \
+    (align_down_pow2((n) + (size) - 1, size))      
+
+#define align_down_pow2(n, size)       \
+    (({assert(is_power_of_2(size));}), \
+     (uptr_t) (n) & ~((size) - 1))
+
+#define align_up_pow2(n, size)                  \
+    (({assert(is_power_of_2(size));}),          \
+     align_down_pow2((uptr_t) (n) + (size) - 1, size))      
+
+
+#define mod_pow2(n, mod)                        \
+    ((uintptr_t) (n) & ((mod) - 1))
 
 extern ptrdiff_t ptrdiff(void *a, void *b);
 
