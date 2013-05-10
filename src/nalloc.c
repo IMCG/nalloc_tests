@@ -35,7 +35,6 @@ __thread list_t private_arenas = INITIALIZED_LIST;
 /* Warning: It happens to be the case that INITIALIZED_BLIST is a big fat
    NULL. */
 __thread blist_t blists[NBLISTS];
-__thread block_t dummy = { .free = 0, .size = MAX_BLOCK, .l_size = MAX_BLOCK };
 __thread lfstack_t priv_wayward_blocks = INITIALIZED_STACK;
 
 void *nmalloc(size_t size){
@@ -273,7 +272,6 @@ int free_block_valid(block_t *b){
     assert(!r_neighbor(b) || r_neighbor(b)->l_size == b->size);
     assert(lanchor_valid(&b->lanc,
                          &blist_smaller_than(b->size)->blocks));
-    assert(dummy.size == MAX_BLOCK);
     
     return 1;
 }
@@ -283,10 +281,14 @@ int used_block_valid(used_block_t *_b){
     assert(b->size >= MIN_BLOCK);
     assert(b->size <= MAX_BLOCK);
     assert(aligned(_b->data, MIN_ALIGNMENT));
-    assert(!l_neighbor(b) || l_neighbor(b)->size == b->l_size);
-    assert(!r_neighbor(b) || r_neighbor(b)->l_size == b->size);
-    assert(dummy.size == MAX_BLOCK);
-
+    /* These reads aren't actually thread safe, as the neighbors may be
+       splitting in another thread. Unless we own the arena, in which case the
+       only splitter is us. */
+    if(arena_of(b)->wayward_blocks == &priv_wayward_blocks){
+        assert(!l_neighbor(b) || l_neighbor(b)->size == b->l_size);
+        assert(!r_neighbor(b) || r_neighbor(b)->l_size == b->size);
+    }
+    
     return 1;
 }
 
