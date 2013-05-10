@@ -83,13 +83,10 @@ typedef struct{
 
 /* TODO: Need a list of blocks here. */
 typedef struct  __attribute__ ((packed)){
-    lfstack_t wayward_blocks;
-    union{
-        sanchor_t sanc;
-        lanchor_t lanc;
-    };
-    pthread_t owner;
-    uint8_t pad[4];
+    lfstack_t disowned_blocks;
+    sanchor_t sanc;
+    lfstack_t *wayward_blocks;
+    uint8_t pad[12];
     block_t heap[];
 } arena_t;
 
@@ -101,11 +98,11 @@ COMPILE_ASSERT(aligned(offsetof(arena_t, heap) +
 /* Depends on arena_t def. */
 COMPILE_ASSERT(MAX_BLOCK < 1 << MAX_POW);
 
-#define INITIALIZED_FREE_ARENA                                          \
+#define INITIALIZED_FREE_ARENA(self_ptr)                                \
     {                                                                   \
-        .owner = 0,                                                     \
-            .wayward_blocks = INITIALIZED_STACK,                        \
+        .disowned_blocks = INITIALIZED_STACK,                           \
             .sanc = INITIALIZED_SANCHOR,                                \
+            .wayward_blocks = &(self_ptr)->disowned_blocks,             \
             }
 
 
@@ -127,8 +124,7 @@ void dealloc(used_block_t *_b);
 void *merge_adjacent(block_t *b);
 
 void return_wayward_block(wayward_block_t *b, arena_t *arena);
-void absorb_all_wayward_blocks(list_t *arenas);
-void absorb_arena_blocks(arena_t *arena);
+used_block_t *alloc_from_wayward_blocks(size_t size);
 
 void block_init(block_t *b, size_t size, size_t l_size);
 int supports_alignment(block_t *b, size_t enough, size_t alignment);

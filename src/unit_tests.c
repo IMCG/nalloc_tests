@@ -26,11 +26,11 @@ typedef void *(entrypoint_t)(void *);
 #define kfork(entry, arg, flag)                 \
     pthread_create(&kids[i], NULL, entry, arg)  \
 
-/* #define wsmalloc(size) nmalloc(size) */
-/* #define wsfree(ptr, size) nfree(ptr) */
+#define wsmalloc(size) nmalloc(size)
+#define wsfree(ptr, size) nfree(ptr)
 
-#define wsmalloc malloc
-#define wsfree(ptr, size) free(ptr)
+/* #define wsmalloc malloc */
+/* #define wsfree(ptr, size) free(ptr) */
 
 #define report_profile() 
 
@@ -215,13 +215,14 @@ void *mt_sharing_child(struct sharing_child_args *shared){
         _yield(parent_tid);
 
     lfstack_t priv_blocks = INITIALIZED_STACK;
+    size_t num_allocs = 0;
     for(int i = 0; i < NUM_OPS; i++){
         int size;
         lfstack_t *blocks= &shared->block_stacks[prand() % NUM_STACKS];
         int malloc_prob =
-            blocks->size < NUM_ALLOCATIONS/2 ? 75 :
-            blocks->size < NUM_ALLOCATIONS ? 50 :
-            blocks->size < NUM_ALLOCATIONS * 2 ? 25 :
+            num_allocs < NUM_ALLOCATIONS/2 ? 75 :
+            num_allocs < NUM_ALLOCATIONS ? 50 :
+            num_allocs < NUM_ALLOCATIONS * 2 ? 25 :
             0;
 
         if(rand_percent(malloc_prob)){
@@ -235,7 +236,8 @@ void *mt_sharing_child(struct sharing_child_args *shared){
             /* Try to trigger false sharing. */
             /* write_magics(cur_block, tid); */
             stack_push(&cur_block->sanc, blocks);
-        }else if(blocks->size){
+            num_allocs++;
+        }else{
             cur_block =
                 stack_pop_lookup(tblock_t, sanc, blocks);
             if(!cur_block)
@@ -253,6 +255,7 @@ void *mt_sharing_child(struct sharing_child_args *shared){
             log2("Freeing priv: %p", cur_block);
             /* check_magics(cur_block, tid); */
             wsfree(cur_block, cur_block->size);
+            num_allocs--;
         }
     }
 

@@ -17,7 +17,7 @@
 #define MAX_FAILURES 5
 
 void stack_push(sanchor_t *anc, lfstack_t *stack){
-    trace(anc, p, stack, p, stack->size, d);
+    trace(anc, p, stack, p);
 
     sanchor_t *top;
     int loops = 0;
@@ -35,7 +35,7 @@ void stack_push(sanchor_t *anc, lfstack_t *stack){
 }
 
 sanchor_t *stack_pop(lfstack_t *stack){
-    trace(stack, p, stack->size, d);
+    trace(stack, p);
 
     tagptr_t old;
     tagptr_t new;
@@ -43,21 +43,13 @@ sanchor_t *stack_pop(lfstack_t *stack){
 
     assert(aligned(&stack->top, 8));
 
-    /* Test&test&set */
-    if(!stack->top.ptr)
-        return NULL;
-    
-    /* xadd(-1, &stack->size); */
-
     do{
         /* assert(loops++ <= MAX_FAILURES); */
         old = stack->top;
-        if(old.ptr == NULL){
-            /* xadd(1, &stack->size); */
+        if(old.ptr == NULL)
             return NULL;
-        }
         new.tag = old.tag + 1;
-        /* Even if out of date, this should always be a readable kern ptr. */
+        /* Even if out of date, this should always be a readable ptr. */
         new.ptr = old.ptr->next;
     } while(stack->top.tag != old.tag ||
             cmpxchg128b(*(__int128_t*) &new,

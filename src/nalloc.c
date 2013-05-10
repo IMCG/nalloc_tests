@@ -36,6 +36,7 @@ __thread list_t private_arenas = INITIALIZED_LIST;
    NULL. */
 __thread blist_t blists[NBLISTS];
 __thread block_t dummy = { .free = 0, .size = MAX_BLOCK, .l_size = MAX_BLOCK };
+__thread lfstack_t priv_wayward_blocks = INITIALIZED_STACK;
 
 void *nmalloc(size_t size){
     trace2(size, lu);
@@ -60,7 +61,7 @@ void block_init(block_t *b, size_t size, size_t l_size){
 
 void free_arena_init(arena_t *a){
     trace4(a, p);
-    *a = (arena_t) INITIALIZED_FREE_ARENA;
+    *a = (arena_t) INITIALIZED_FREE_ARENA(a);
     block_init(a->heap, MAX_BLOCK, MAX_BLOCK);
     assert(aligned(((used_block_t*)&a->heap[0])->data, MIN_ALIGNMENT));
 }
@@ -78,16 +79,16 @@ arena_t *arena_new(void){
             free_arena_init(extra);
             stack_push(&extra->sanc, &free_arenas);
         }
-        /* TODO This will result in wasteful magics writes, but that's
-           dbg-only. */
         free_arena_init(fa);
     }
+
+    fa->wayward_blocks = &priv_wayward_blocks;
     
     return fa;
 }
 
 void arena_free(arena_t *freed){
-    freed->sanc = (sanchor_t) INITIALIZED_SANCHOR;
+    freed->wayward_blocks = &freed->disowned_blocks;
     stack_push(&freed->sanc, &free_arenas);
 }
 
@@ -102,7 +103,10 @@ used_block_t *alloc(size_t size){
         if( (found = alloc_from_blist(size, b)) )
             goto done;
 
-    absorb_all_wayward_blocks(&private_arenas);
+    found = alloc_from_wayward_blocks(size);
+    if(found)
+        goto done;
+    
     arena_t *a = arena_new();
     if(!a)
         return NULL;
@@ -163,7 +167,7 @@ void dealloc(used_block_t *_b){
     assert(used_block_valid(_b));
     block_t *b = (block_t *) _b;
     arena_t *arena = arena_of(b);
-    if(arena->owner == pthread_self()){
+    if(arena->wayward_blocks == &priv_wayward_blocks){
         b = merge_adjacent(b);
         b->free = 1;
         assert(write_block_magics(b));
@@ -178,22 +182,19 @@ void dealloc(used_block_t *_b){
 }
 
 void return_wayward_block(wayward_block_t *b, arena_t *arena){
-    stack_push(&b->sanc, &arena->wayward_blocks);
+    stack_push(&b->sanc, arena->wayward_blocks);
 }
 
-void absorb_all_wayward_blocks(list_t *arenas){
-    arena_t *cur_arena;
-    FOR_EACH_LLOOKUP(cur_arena, arena_t, lanc, arenas)
-        absorb_arena_blocks(cur_arena);
+used_block_t *alloc_from_wayward_blocks(size_t size){
+    wayward_block_t *b;
+    used_block_t *found = NULL;
+    FOR_EACH_SPOPALL_LOOKUP(b, wayward_block_t, sanc, &priv_wayward_blocks){
+        if(!found && b->size >= size)
+            found = (used_block_t *) b;
+        dealloc((used_block_t *) b);
+    }
+    return found;
 }
-
-void absorb_arena_blocks(arena_t *arena){
-    wayward_block_t *block;    
-    FOR_EACH_SPOPALL_LOOKUP(block, wayward_block_t, sanc,
-                            &arena->wayward_blocks)
-        dealloc((used_block_t *) block);
-}
-
 
 void *merge_adjacent(block_t *b){
     trace3(b, p);

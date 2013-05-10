@@ -27,13 +27,11 @@ COMPILE_ASSERT(sizeof(tagptr_t) == 16);
 
 typedef struct{
     tagptr_t top __attribute__((__aligned__ (16)));
-    int size;
 }lfstack_t;
 
 #define INITIALIZED_STACK                       \
     {                                           \
         .top = {0, NULL},                       \
-        .size = 0,                              \
     }
 
 typedef struct{
