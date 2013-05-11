@@ -36,10 +36,10 @@ static int num_allocations = 1000;
 static int ops_mult = 100;
 
 #define NUM_OPS (ops_mult * num_allocations)
-#define MAX_WRITES  32
+#define MAX_WRITES  128
 #define REPORT_INTERVAL 100
 
-#define NUM_STACKS 1
+#define NUM_STACKS 16
 #define NUM_LISTS 16
 
 struct tblock_t{
@@ -48,6 +48,7 @@ struct tblock_t{
         sanchor_t sanc;
     };
     int size;
+    int write_start_idx;
     int magics[];
 };
 
@@ -74,16 +75,15 @@ int rand_percent(int per_centum){
 
 void write_magics(struct tblock_t *b, int tid){
     size_t max = umin(b->size - sizeof(*b), MAX_WRITES) / sizeof(b->magics[0]);
-    int r = prand();
+    b->write_start_idx = prand();
     for(int i = 0; i < max; i++)
-        b->magics[(r + i) % max] = tid;
+        b->magics[(b->write_start_idx + i) % max] = tid;
 }
 
 void check_magics(struct tblock_t *b, int tid){
     size_t max = umin(b->size - sizeof(*b), MAX_WRITES) / sizeof(b->magics[0]);
-    int r = prand();
     for(int i = 0; i < max; i++)
-        assert(b->magics[(r + i) % max] == tid);
+        rassert(b->magics[(b->write_start_idx + i) % max], ==, tid);
 }
 
 /* Avoiding IFDEF catastrophe with the magic of weak symbols. */
@@ -402,8 +402,8 @@ int main(int argc, char **argv){
     }
 
     /* expose_bug(); */
-    TIME(malloc_test_randsize());
-    /* TIME(malloc_test_sharing()); */
+    /* TIME(malloc_test_randsize()); */
+    TIME(malloc_test_sharing());
     /* TIME(producer_test()); */
 
     void *tst;
