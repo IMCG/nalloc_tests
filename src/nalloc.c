@@ -36,6 +36,7 @@ static __thread blist_t blists[NBLISTS];
 __attribute__ ((__aligned__(64)))
 static __thread lfstack_t priv_wayward_blocks = INITIALIZED_STACK;
 
+__attribute__ ((__aligned__(64)))
 static __thread nalloc_profile_t profile;
 
 /* Accounting info for pthread's wonky thread destructor setup. */

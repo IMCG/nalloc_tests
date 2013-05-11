@@ -52,6 +52,7 @@ struct tblock_t{
         sanchor_t sanc;
     };
     int size;
+    int write_start_idx;
     int magics[];
 };
 
@@ -75,17 +76,15 @@ int rand_percent(int per_centum){
 
 void write_magics(struct tblock_t *b, int tid){
     size_t max = umin(b->size - sizeof(*b), max_writes) / sizeof(b->magics[0]);
-    PLUNT(max);
-    int r = prand();
+    b->write_start_idx = prand();
     for(int i = 0; i < max; i++)
-        b->magics[(r + i) % max] = tid;
+        b->magics[(b->write_start_idx + i) % max] = tid;
 }
 
 void check_magics(struct tblock_t *b, int tid){
     size_t max = umin(b->size - sizeof(*b), max_writes) / sizeof(b->magics[0]);
-    int r = prand();
     for(int i = 0; i < max; i++)
-        assert(b->magics[(r + i) % max] == tid);
+        rassert(b->magics[(b->write_start_idx + i) % max], ==, tid);
 }
 
 void *wsmalloc(size_t size){

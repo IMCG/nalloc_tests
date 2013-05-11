@@ -21,14 +21,16 @@ libnalloc.so: $(SRCS)
 # This is here so that I can set up a scheme where ONLY the test uses
 # nalloc. Better for debugging, as you can't run gdb&co on top of a broken
 # allocator.
-natest: $(filter-out obj/unit_tests.o,$(filter-out obj/nalloc.o,$(OBJS)))
-		$(CC) $(CFLAGS) $(LDFLAGS) -DHIDE_NALLOC -o $@ \
-		$(SRCDIR)/nalloc.c \
-		$(SRCDIR)/unit_tests.c \
-		$^
+# natest: $(OBJS)
+# 		$(CC) $(CFLAGS) $(LDFLAGS) -DHIDE_NALLOC -o $@ \
+# 		$(SRCDIR)/nalloc.c \
+# 		$(SRCDIR)/unit_tests.c \
+# 		$(filter-out obj/unit_tests.o,$(filter-out obj/nalloc.o,$^))
 
-utest: $(filter-out obj/nalloc.o,$(OBJS))
-		$(CC) $(LDFLAGS) -o $@ $^
+utest: $(OBJS)
+		$(CC) $(LDFLAGS) -o $@ \
+		$(filter-out obj/nalloc.o, $^)
+
 $(OBJDIR)/%.o: $(SRCDIR)/%.c 
 		$(CC) $(CFLAGS) -o $@ -c $<;
 		gcc $(CFLAGS) -MM -MT $(OBJDIR)/$*.o -o $(OBJDIR)/$*.dep $^

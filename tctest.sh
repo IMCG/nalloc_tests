@@ -1,3 +1,3 @@
-LD_PRELOAD="$PWD/libtcmalloc_minimal.so" ./utest $@
+LD_PRELOAD="$PWD/libtcmalloc_and_profiler.so" ./utest $@
 
    
