@@ -25,103 +25,42 @@
 #define NALLOC_MAGIC_INT 0x999A110C
 
 #define PAGE_SHIFT 12
-/* AKA 0x1000 */
 #define PAGE_SIZE (1 << PAGE_SHIFT)
-#define ARENA_SIZE (PAGE_SIZE)
+#define ARENA_SIZE (PAGE_SIZE >> 1)
 
-#define ARENA_ALLOC_BATCH 16
-#define IDEAL_FULL_ARENAS 5
-
-#define MIN_POW 5
-#define MAX_POW 12
-
-#define MAX_BLOCK (const_align_down_pow2(PAGE_SIZE - sizeof(arena_t),   \
-                                         MIN_BLOCK))
-
-#define MIN_BLOCK (1 << MIN_POW)
 #define MIN_ALIGNMENT 16
-COMPILE_ASSERT(aligned(MIN_BLOCK, MIN_ALIGNMENT));
-COMPILE_ASSERT(aligned(MIN_ALIGNMENT, sizeof(long long)));
+
+#define SLAB_ALLOC_BATCH 16
+#define IDEAL_FULL_SLABS 5
+
+#define MAX_BLOCK (const_align_down_pow2(PAGE_SIZE - sizeof(arena_t), MIN_ALIGNMENT))
 
 static const int blist_size_lookup[] = {
-    32, 48, 64, 80, 96, 112, 256, 512, 1024,
+    8, 16, 24, 32, 48, 64, 80, 96, 112, 256, 512, 1024,
 };
-/* Has to be a natural number for REPEATING_LIST(). */
 #define NBLISTS ARR_LEN(blist_size_lookup)
 
 typedef struct{
-    unsigned int free:1;
-    unsigned int size:MAX_POW;
-    unsigned int l_size:MAX_POW;
-    lanchor_t lanc;
-
-    /* __aligned__ didn't do the trick, surprisingly. GCC manual mentions
-       linked limitations. */
-    uint8_t manpad[8];
-
-    int magics[];
-} block_t __attribute__((__aligned__(32)));
-
-COMPILE_ASSERT(sizeof(unsigned int) == 4);
-COMPILE_ASSERT(sizeof(block_t) <= MIN_BLOCK);
-COMPILE_ASSERT(sizeof(block_t) == 32);
-
-typedef struct{
-    list_t blocks;
-} blist_t;
-
-#define INITIALIZED_BLIST {.blocks = INITIALIZED_LIST}
-
-typedef struct{
-    unsigned int free:1;
-    unsigned int size:MAX_POW;
-    unsigned int l_size:MAX_POW;
-    int data[];
-} used_block_t;
-
-COMPILE_ASSERT(sizeof(used_block_t) == 4);
-
-typedef struct{
-    unsigned int free:1;
-    unsigned int size:MAX_POW;
-    unsigned int l_size:MAX_POW;
     sanchor_t sanc;
-    void *data[];
-} wayward_block_t;
+} block_t __attribute__((__aligned__(4)));
+COMPILE_ASSERT(sizeof(block_t) <= MIN_BLOCK);
+
+typedef struct{
+    lfstack_t blocks[NBLISTS];
+} bcache_t;
 
 typedef struct{
     size_t size;
     void *data[];
 } large_block_t;
 
-COMPILE_ASSERT(sizeof(large_block_t) != sizeof(used_block_t));
+COMPILE_ASSERT(sizeof(large_block_t) != sizeof(arena_t));
 
-typedef struct  __attribute__ ((packed)){
-    lfstack_t disowned_blocks;
-    union{
-        sanchor_t sanc;
-        lanchor_t lanc;
-    };
+typedef struct{
     lfstack_t *wayward_blocks;
-    uint8_t pad[4];
-    block_t heap[];
+    sanchor_t sanc;
+    unsigned int size;
 } arena_t;
-
-COMPILE_ASSERT(MAX_BLOCK < 1 << MAX_POW);
-
-/* This makes guaranteeing min alignment trivial. */
-COMPILE_ASSERT(aligned(offsetof(arena_t, heap) +
-                       offsetof(used_block_t, data),
-                       MIN_ALIGNMENT));
-COMPILE_ASSERT(
-    const_align_up_pow2(MAX_BLOCK + sizeof(arena_t), MIN_ALIGNMENT) <= ARENA_SIZE);
-
-#define INITIALIZED_FREE_ARENA(self_ptr)                                \
-    {                                                                   \
-        .disowned_blocks = INITIALIZED_STACK,                           \
-            .sanc = INITIALIZED_SANCHOR,                                \
-            .wayward_blocks = &(self_ptr)->disowned_blocks,             \
-            }
 
 typedef struct {
     size_t num_bytes;
@@ -129,11 +68,6 @@ typedef struct {
     size_t num_bytes_highwater;
     size_t num_arenas_highwater;
 } nalloc_profile_t;
-
-
-typedef struct  __attribute__ ((packed)){
-    lfstack_t *wayward_blocks;
-} slab_t;
 
 void *nmalloc(size_t size);
 void nfree(void *buf);

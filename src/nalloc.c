@@ -109,15 +109,7 @@ void large_dealloc(large_block_t *block){
     munmap(block, block->size);
 }
 
-void block_init(block_t *b, size_t size, size_t l_size){
-    b->size = size;
-    b->free = 1;
-    b->l_size = l_size;
-    b->lanc = (lanchor_t) INITIALIZED_LANCHOR;
-    assert(write_block_magics(b));
-}
-
-arena_t *arena_new(void){
+arena_t *arena_new(bstack_t *to_satisfy){
     arena_t *fa = stack_pop_lookup(arena_t, sanc, &free_arenas);
     if(!fa){
         fa = mmap(NULL, ARENA_SIZE * ARENA_ALLOC_BATCH, PROT_READ | PROT_WRITE,
@@ -127,10 +119,10 @@ arena_t *arena_new(void){
         /* Note that we start from 1. */
         for(int i = 1; i < ARENA_ALLOC_BATCH; i++){
             arena_t *extra = (void*) ((uptr_t) fa + i * ARENA_SIZE);
-            free_arena_init(extra);
+            *extra = INITIALIZED_ARENA(NULL);
             stack_push(&extra->sanc, &free_arenas);
+            free_arena_init(stack);
         }
-        free_arena_init(fa);
     }
 
     profile_arenas(1);
@@ -139,13 +131,6 @@ arena_t *arena_new(void){
     list_add_front(&fa->lanc, &priv_arenas);
     
     return fa;
-}
-
-void free_arena_init(arena_t *a){
-    trace4(a, p);
-    *a = (arena_t) INITIALIZED_FREE_ARENA(a);
-    block_init(a->heap, MAX_BLOCK, MAX_BLOCK);
-    assert(aligned(((used_block_t*)&a->heap[0])->data, MIN_ALIGNMENT));
 }
 
 void arena_free(arena_t *freed){
