@@ -28,19 +28,15 @@ typedef void *(entrypoint_t)(void *);
 #define kfork(entry, arg, flag)                 \
     pthread_create(&kids[i], NULL, entry, arg)  \
 
-/* #define wsmalloc(size) nmalloc(size) */
-/* #define wsfree(ptr, size) nfree(ptr) */
-
 #define wsmalloc(size) malloc(size)
 #define wsfree(ptr, size) free(ptr)
 
-/* #define NUM_MALLOC_TESTERS 1000 */
 static int num_threads = 1;
 static int num_allocations = 20000;
 static int ops_mult = 100;
 
 #define NUM_OPS (ops_mult * num_allocations)
-#define MAX_WRITES  16
+#define MAX_WRITES  MAX_SIZE
 #define REPORT_INTERVAL 100
 
 #define NUM_STACKS 1
@@ -58,21 +54,19 @@ struct tblock_t{
 #define MAX_SIZE (1024)
 #define MIN_SIZE (sizeof(struct tblock_t))
 
-COMPILE_ASSERT(MIN_SIZE >= sizeof(struct tblock_t));
-
-/* Fun fact: without the volatile, a test-yield loop on rdy will optimize the
-   test part and will just yield in a loop forever. Thanks, GCC! */
+/* Fun fact: without the volatile, a test-yield loop on rdy will optimize out
+   the test part and will just yield in a loop forever. Meanwhile
+   if(0){expression;} generates an ASM branch that's never called. Nice job,
+   GCC! */
 static volatile int rdy;
 
 static __thread unsigned int seed;
 void prand_init(void){
     assert(read(open("/dev/urandom", O_RDONLY), &seed, sizeof(seed)) ==
            sizeof(seed));
-    /* assert(initstate(seed, prand_state, ARR_LEN(prand_state)) != prand_state); */
 }
 long int prand(void){
     return rand_r(&seed);
-    /* return random(); */
 }
 int rand_percent(int per_centum){
     return prand() % 100 <= umin(per_centum, 100);
@@ -97,11 +91,11 @@ void check_magics(struct tblock_t *b, int tid){
 /* nalloc_profile_t *get_profile(); */
 
 void report_profile(void){
-/*     if(get_profile){ */
-/*         nalloc_profile_t *prof = get_profile(); */
-/*         PUNT(prof->total_heap_highwater); */
-/*         PUNT(prof->num_arenas_highwater); */
-/*     } */
+    /* if(get_profile){ */
+    /*     nalloc_profile_t *prof = get_profile(); */
+    /*     PUNT(prof->total_heap_highwater); */
+    /*     PUNT(prof->num_arenas_highwater); */
+    /* } */
 }
 
 void mt_child_rand(int parent_tid);

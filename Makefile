@@ -8,7 +8,7 @@ SRCS=$(wildcard $(SRCDIR)/*.c $(SRCDIR)/*.S)
 _OBJS=$(patsubst %.c,%.o,$(patsubst %.S,%.o,$(SRCS)))
 OBJS=$(subst $(SRCDIR),$(OBJDIR),$(_OBJS))
 
-all: utest libnalloc.so
+all: utest natest libnalloc.so
 
 -include $(OBJS:.o=.dep)
 
@@ -21,12 +21,11 @@ libnalloc.so: $(SRCS)
 # This is here so that I can set up a scheme where ONLY the test uses
 # nalloc. Better for debugging, as you can't run gdb&co on top of a broken
 # allocator.
-# utest: $(OBJS)
-# 		$(CC) $(LDFLAGS) -o $@ $^
+natest: $(OBJS)
+		$(CC) $(LDFLAGS) -o $@ $^
 
 utest: $(filter-out obj/nalloc.o,$(OBJS))
 		$(CC) $(LDFLAGS) -o $@ $^
-
 $(OBJDIR)/%.o: $(SRCDIR)/%.c 
 		$(CC) $(CFLAGS) -o $@ -c $<;
 		gcc $(CFLAGS) -MM -MT $(OBJDIR)/$*.o -o $(OBJDIR)/$*.dep $^

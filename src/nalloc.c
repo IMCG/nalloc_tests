@@ -38,24 +38,32 @@ __thread blist_t blists[NBLISTS];
 __attribute__ ((__aligned__(64)))
 __thread lfstack_t priv_wayward_blocks = INITIALIZED_STACK;
 
-
 /* Accounting info for pthread's insane thread destructor setup. */
 static pthread_once_t key_rdy = PTHREAD_ONCE_INIT;
 static pthread_key_t destructor_key = 0;
 
 void *malloc(size_t size){
     trace2(size, lu);
-    used_block_t *found = alloc(umax(align_up_pow2(size + sizeof(used_block_t),
-                                                   MIN_ALIGNMENT),
-                                     MIN_BLOCK));
-    return found ? found + 1 : NULL;
+    size_t new_size = max(align_up_pow2(size + sizeof(used_block_t),
+                                        MIN_ALIGNMENT),
+                          MIN_BLOCK);
+    if(new_size > MAX_BLOCK){
+        large_block_t *large_found = large_alloc(size);
+        return large_found ? large_found + 1 : NULL;
+    }
+    used_block_t *small_found = alloc(new_size);
+    return small_found ? small_found + 1 : NULL;
 }
 
 void free(void *buf){
     trace2(buf, p);
     if(!buf)
         return;
-    dealloc((used_block_t *) buf - 1);
+    /* TODO: won't cut it for large arena sizes. */
+    if(aligned_pow2((large_block_t *) buf - 1, PAGE_SIZE))
+        large_dealloc((large_block_t *) buf - 1);
+    else
+        dealloc((used_block_t *) buf - 1);
 }
 
 void *calloc(size_t nmemb, size_t size){
@@ -76,6 +84,22 @@ void *realloc(void *ptr, size_t size){
     return ptr;
 }
 
+void *large_alloc(size_t size){
+    size = align_up_pow2(size, PAGE_SIZE);
+    large_block_t *found =
+        mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+             -1, 0);
+    if(!found)
+        return NULL;
+    found->size = size;
+    return found;
+}
+
+void large_dealloc(large_block_t *block){
+    assert(aligned(block, PAGE_SIZE));
+    munmap(block, block->size);
+}
+
 void block_init(block_t *b, size_t size, size_t l_size){
     b->size = size;
     b->free = 1;
@@ -84,14 +108,6 @@ void block_init(block_t *b, size_t size, size_t l_size){
     assert(write_block_magics(b));
 }
 
-void free_arena_init(arena_t *a){
-    trace4(a, p);
-    *a = (arena_t) INITIALIZED_FREE_ARENA(a);
-    block_init(a->heap, MAX_BLOCK, MAX_BLOCK);
-    assert(aligned(((used_block_t*)&a->heap[0])->data, MIN_ALIGNMENT));
-}
-
-#include <unistd.h>
 arena_t *arena_new(void){
     arena_t *fa = stack_pop_lookup(arena_t, sanc, &free_arenas);
     if(!fa){
@@ -114,6 +130,13 @@ arena_t *arena_new(void){
     return fa;
 }
 
+void free_arena_init(arena_t *a){
+    trace4(a, p);
+    *a = (arena_t) INITIALIZED_FREE_ARENA(a);
+    block_init(a->heap, MAX_BLOCK, MAX_BLOCK);
+    assert(aligned(((used_block_t*)&a->heap[0])->data, MIN_ALIGNMENT));
+}
+
 void arena_free(arena_t *freed){
     list_remove(&freed->lanc, &priv_arenas);
     freed->wayward_blocks = &freed->disowned_blocks;
@@ -122,7 +145,6 @@ void arena_free(arena_t *freed){
 
 used_block_t *alloc(size_t size){
     trace2(size, lu);
-    assert(size <= MAX_BLOCK);
     assert(size >= MIN_BLOCK);
 
     register_thread_destructor();
@@ -256,7 +278,6 @@ void return_wayward_block(wayward_block_t *b, arena_t *arena){
 /*         dealloc((used_block_t *) b); */
 /*     return NULL; */
 /* } */
-
 
 used_block_t *alloc_from_wayward_blocks(size_t size){
     wayward_block_t *b, *tmp;

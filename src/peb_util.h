@@ -110,9 +110,11 @@ static inline uintptr_t ualign_up(uintptr_t addr, size_t size){
     (({assert(is_power_of_2(size));}),          \
      align_down_pow2((uptr_t) (n) + (size) - 1, size))      
 
-
 #define mod_pow2(n, mod)                        \
     ((uintptr_t) (n) & ((mod) - 1))
+
+#define aligned_pow2(n, size)                   \
+    (mod_pow2(n, size) == 0)
 
 extern ptrdiff_t ptrdiff(void *a, void *b);
 

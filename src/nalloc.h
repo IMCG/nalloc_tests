@@ -16,9 +16,10 @@
 #include <stack.h>
 
 #define NALLOC_MAGIC_INT 0x999A110C
-#define ARENA_MAGIC_INT 0xD15C0BA1
 
-#define PAGE_SIZE (0x1000)
+#define PAGE_SHIFT 12
+/* AKA 0x1000 */
+#define PAGE_SIZE (1 << PAGE_SHIFT)
 #define ARENA_SIZE (PAGE_SIZE)
 
 #define ARENA_ALLOC_BATCH 16
@@ -27,7 +28,7 @@
 #define MIN_POW 5
 #define MAX_POW 12
 
-#define MAX_BLOCK (const_align_down_pow2(PAGE_SIZE - offsetof(arena_t, heap), \
+#define MAX_BLOCK (const_align_down_pow2(PAGE_SIZE - sizeof(arena_t),   \
                                          MIN_BLOCK))
 
 #define MIN_BLOCK (1 << MIN_POW)
@@ -39,8 +40,7 @@ static const int blist_size_lookup[] = {
     32, 48, 64, 80, 96, 112, 256, 512, 1024,
 };
 /* Has to be a natural number for REPEATING_LIST(). */
-#define NBLISTS 9
-COMPILE_ASSERT(ARR_LEN(blist_size_lookup) == NBLISTS);
+#define NBLISTS ARR_LEN(blist_size_lookup)
 
 typedef struct{
     unsigned int free:1;
@@ -63,6 +63,8 @@ typedef struct{
     list_t blocks;
 } blist_t;
 
+#define INITIALIZED_BLIST {.blocks = INITIALIZED_LIST}
+
 typedef struct{
     unsigned int free:1;
     unsigned int size:MAX_POW;
@@ -80,7 +82,12 @@ typedef struct{
     void *data[];
 } wayward_block_t;
 
-#define INITIALIZED_BLIST {.blocks = INITIALIZED_LIST}
+typedef struct{
+    size_t size;
+    void *data[];
+} large_block_t;
+
+COMPILE_ASSERT(sizeof(large_block_t) != sizeof(used_block_t));
 
 typedef struct  __attribute__ ((packed)){
     lfstack_t disowned_blocks;
@@ -118,6 +125,9 @@ arena_t *arena_new(void);
 void arena_free(arena_t *arena);               
 void free_arena_init(arena_t *a);
 void arena_init(arena_t *arena);
+
+void *large_alloc(size_t size);
+void large_dealloc(large_block_t *block);
 
 used_block_t *alloc(size_t size);
 used_block_t *alloc_from_blist(size_t enough, blist_t *bl);
