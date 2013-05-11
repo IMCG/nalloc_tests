@@ -28,17 +28,17 @@
 #include <sys/mman.h>
 #include <global.h>
 
-#define MAX_ARENA_FAILS 10
-
 static lfstack_t free_arenas = INITIALIZED_STACK;
-__thread list_t priv_arenas = INITIALIZED_LIST;
+static __thread list_t priv_arenas = INITIALIZED_LIST;
 /* Warning: It happens to be the case that INITIALIZED_BLIST is a big fat
    NULL. */
-__thread blist_t blists[NBLISTS];
+static __thread blist_t blists[NBLISTS];
 __attribute__ ((__aligned__(64)))
-__thread lfstack_t priv_wayward_blocks = INITIALIZED_STACK;
+static __thread lfstack_t priv_wayward_blocks = INITIALIZED_STACK;
 
-/* Accounting info for pthread's insane thread destructor setup. */
+static __thread nalloc_profile_t profile;
+
+/* Accounting info for pthread's wonky thread destructor setup. */
 static pthread_once_t key_rdy = PTHREAD_ONCE_INIT;
 static pthread_key_t destructor_key = 0;
 
@@ -49,9 +49,11 @@ void *malloc(size_t size){
                           MIN_BLOCK);
     if(new_size > MAX_BLOCK){
         large_block_t *large_found = large_alloc(size);
+        profile_bytes(large_found->size);
         return large_found ? large_found + 1 : NULL;
     }
     used_block_t *small_found = alloc(new_size);
+    profile_bytes(small_found->size);
     return small_found ? small_found + 1 : NULL;
 }
 
@@ -60,10 +62,16 @@ void free(void *buf){
     if(!buf)
         return;
     /* TODO: won't cut it for large arena sizes. */
-    if(aligned_pow2((large_block_t *) buf - 1, PAGE_SIZE))
-        large_dealloc((large_block_t *) buf - 1);
-    else
-        dealloc((used_block_t *) buf - 1);
+    if(aligned_pow2((large_block_t *) buf - 1, PAGE_SIZE)){
+        large_block_t *large = (large_block_t *) buf - 1;
+        profile_bytes(0 - large->size);
+        large_dealloc(large);
+    }
+    else{
+        used_block_t *small = (used_block_t *) buf - 1;
+        profile_bytes(0 - small->size);
+        dealloc(small);
+    }
 }
 
 void *calloc(size_t nmemb, size_t size){
@@ -124,6 +132,8 @@ arena_t *arena_new(void){
         free_arena_init(fa);
     }
 
+    profile_arenas(1);
+    
     fa->wayward_blocks = &priv_wayward_blocks;
     list_add_front(&fa->lanc, &priv_arenas);
     
@@ -141,6 +151,7 @@ void arena_free(arena_t *freed){
     list_remove(&freed->lanc, &priv_arenas);
     freed->wayward_blocks = &freed->disowned_blocks;
     stack_push(&freed->sanc, &free_arenas);
+    profile_arenas(-1);
 }
 
 used_block_t *alloc(size_t size){
@@ -358,6 +369,20 @@ int register_thread_destructor(void){
     return 0;
 }
 
+
+void profile_bytes(size_t nbytes){
+    profile.num_bytes_highwater =
+        max(profile.num_bytes += nbytes, profile.num_bytes_highwater);
+}
+
+void profile_arenas(size_t narenas){
+    profile.num_arenas_highwater =
+        max(profile.num_arenas += narenas, profile.num_arenas_highwater);
+}
+
+nalloc_profile_t *get_profile(void){
+    return &profile;
+}
 
 int free_block_valid(block_t *b){
     assert(block_magics_valid(b));

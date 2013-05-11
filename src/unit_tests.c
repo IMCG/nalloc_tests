@@ -28,19 +28,23 @@ typedef void *(entrypoint_t)(void *);
 #define kfork(entry, arg, flag)                 \
     pthread_create(&kids[i], NULL, entry, arg)  \
 
-#define wsmalloc(size) malloc(size)
-#define wsfree(ptr, size) free(ptr)
-
-static int num_threads = 1;
+static int num_threads = 12;
 static int num_allocations = 1000;
-static int ops_mult = 100;
+static int ops_mult = 1000;
+static int max_writes = 0;
+static int print_profile = 0;
 
 #define NUM_OPS (ops_mult * num_allocations)
-#define MAX_WRITES  32
-#define REPORT_INTERVAL 100
 
-#define NUM_STACKS 1
+#define NUM_STACKS 16
 #define NUM_LISTS 16
+
+#define MAX_SIZE (1024)
+#define MIN_SIZE (sizeof(struct tblock_t))
+
+#define CAVG_BIAS .05
+static __thread double malloc_cavg;
+static __thread double free_cavg;
 
 struct tblock_t{
     union{
@@ -50,9 +54,6 @@ struct tblock_t{
     int size;
     int magics[];
 };
-
-#define MAX_SIZE (1024)
-#define MIN_SIZE (sizeof(struct tblock_t))
 
 /* Fun fact: without the volatile, a test-yield loop on rdy will optimize out
    the test part and will just yield in a loop forever. Meanwhile
@@ -73,29 +74,69 @@ int rand_percent(int per_centum){
 }
 
 void write_magics(struct tblock_t *b, int tid){
-    size_t max = umin(b->size - sizeof(*b), MAX_WRITES) / sizeof(b->magics[0]);
+    size_t max = umin(b->size - sizeof(*b), max_writes) / sizeof(b->magics[0]);
+    PLUNT(max);
     int r = prand();
     for(int i = 0; i < max; i++)
         b->magics[(r + i) % max] = tid;
 }
 
 void check_magics(struct tblock_t *b, int tid){
-    size_t max = umin(b->size - sizeof(*b), MAX_WRITES) / sizeof(b->magics[0]);
+    size_t max = umin(b->size - sizeof(*b), max_writes) / sizeof(b->magics[0]);
     int r = prand();
     for(int i = 0; i < max; i++)
         assert(b->magics[(r + i) % max] == tid);
 }
 
-/* Avoiding IFDEF catastrophe with the magic of weak symbols. */
-/* __attribute__ ((weak)) */
-/* nalloc_profile_t *get_profile(); */
+void *wsmalloc(size_t size){
+    void *found;
+    if(print_profile)
+        malloc_cavg = CAVG_BIAS * GETTIME(found = malloc(size))
+            + (1 - CAVG_BIAS) * malloc_cavg;
+    else
+        found = malloc(size);
+    return found;
+}
 
-void report_profile(void){
-    /* if(get_profile){ */
-    /*     nalloc_profile_t *prof = get_profile(); */
-    /*     PUNT(prof->total_heap_highwater); */
-    /*     PUNT(prof->num_arenas_highwater); */
-    /* } */
+void wsfree(void *ptr, size_t ignored_future_proofing){
+    if(print_profile)
+        free_cavg = CAVG_BIAS * GETTIME(free(ptr))
+            + (1 - CAVG_BIAS) * free_cavg;
+    else
+        free(ptr);
+}
+
+void profile_init(void){
+    void *ptr;
+    if(!print_profile)
+        return;
+    malloc_cavg = GETTIME(ptr = malloc(42));
+    assert(ptr);
+    free(ptr);
+}
+
+/* Avoiding IFDEF catastrophe with the magic of weak symbols. */
+__attribute__ ((weak))
+nalloc_profile_t *get_profile();
+        
+void profile_report(void){
+    static pthread_mutex_t report_lock;
+
+    if(!print_profile)
+        return;
+
+    pthread_mutex_lock(&report_lock);
+        
+    PFLT(malloc_cavg);
+    PFLT(free_cavg);
+    
+    if(get_profile){
+        nalloc_profile_t *prof = get_profile();
+        PLUNT(prof->num_bytes_highwater);
+        PLUNT(prof->num_arenas_highwater);
+    }
+
+    pthread_mutex_unlock(&report_lock);
 }
 
 void mt_child_rand(int parent_tid);
@@ -137,9 +178,6 @@ void mt_child_rand(int parent_tid){
             blocks->size < num_allocations * 2 ? 25 :
             0;
         
-        if(blocks->size > 0 && blocks->size % REPORT_INTERVAL == 0)
-            log2("i:%d allocated:%d", i, blocks->size);
-
         if(rand_percent(malloc_prob)){
             size = umax(MIN_SIZE, prand() % (MAX_SIZE));
             cur_block = wsmalloc(size);
@@ -164,7 +202,7 @@ void mt_child_rand(int parent_tid){
             wsfree(cur_block, cur_block->size);
     }
 
-    report_profile();
+    profile_report();
     /* exit(_gettid()); */
 }
 
@@ -252,7 +290,7 @@ void mt_sharing_child(struct child_args *shared){
         }
     }
 
-    report_profile();
+    profile_report();
 }
 
 void producer_child(struct child_args *shared);
@@ -380,11 +418,13 @@ void consumer_child(struct child_args *shared){
 
     }
 
-    report_profile();
+    profile_report();
 }
 
 int main(int argc, char **argv){
     unmute_log();
+
+    int program = 1;
 
     int opt;
     while( (opt = getopt(argc, argv, "t:a:o:")) != -1 ){
@@ -398,17 +438,28 @@ int main(int argc, char **argv){
         case 'o':
             ops_mult = atoi(optarg);
             break;
+        case 'p':
+            program = atoi(optarg);
+        case 'w':
+            max_writes = atoi(optarg);
+        case 'l':
+            print_profile = 1;
         }
     }
 
-    /* expose_bug(); */
-    TIME(malloc_test_randsize());
-    /* TIME(malloc_test_sharing()); */
-    /* TIME(producer_test()); */
+    profile_init();
 
-    void *tst;
-    TIME(tst = malloc(20));
-    TIME(free(tst));
+    switch(program){
+    case 1:
+        TIME(malloc_test_randsize());
+        break;
+    case 2:
+        TIME(malloc_test_sharing());
+        break;
+    case 3:
+        TIME(producer_test());
+        break;
+    }
 
     return 0;
 }

@@ -59,13 +59,10 @@
 /*     lprintf("%s\n"                                              \ */
 /*             COMMA_AND_TAIL_ARGS(dummy, FORMAT_SPECIFIER_OF(a))); */
 
-#define sploof(a, b) lprintf(a,b)
-
 /* #define PRINT(a, b)                                              \ */
 /*     printf(APPEND_STRING((a), sda),                              \ */
 /*            a) */
-       
-/* TODO: Deprecated. */
+
 
 #define PINT(n)                                 \
     log(#n" = %d", n)
@@ -82,6 +79,9 @@
     log(#n" = %c", n)
 #define PSTR(n)                                 \
     log(#n" = %s", n)
+#define PFLT(n)                                 \
+    log(#n" = %f", n)
+
 
 #define _PINT(lvl, n)                            \
     _log(lvl, #n" = %d", n)

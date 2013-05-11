@@ -15,6 +15,13 @@
 #include <pthread.h>
 #include <stack.h>
 
+#ifdef HIDE_NALLOC
+#define malloc nmalloc
+#define free nfree
+#define calloc ncalloc
+#define realloc nrealloc
+#endif
+
 #define NALLOC_MAGIC_INT 0x999A110C
 
 #define PAGE_SHIFT 12
@@ -116,6 +123,12 @@ COMPILE_ASSERT(
             .wayward_blocks = &(self_ptr)->disowned_blocks,             \
             }
 
+typedef struct {
+    size_t num_bytes;
+    size_t num_arenas;
+    size_t num_bytes_highwater;
+    size_t num_arenas_highwater;
+} nalloc_profile_t;
 
 void *nmalloc(size_t size);
 void nfree(void *buf);
@@ -154,6 +167,9 @@ int register_thread_destructor(void);
 
 arena_t *arena_of(block_t *b);
 int is_junk_block(block_t *b);
+
+void profile_bytes(size_t nbytes);
+void profile_arenas(size_t narenas);
 
 int free_arena_valid(arena_t *a);
 int used_arena_valid(arena_t *a);
