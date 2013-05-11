@@ -43,25 +43,37 @@ __thread lfstack_t priv_wayward_blocks = INITIALIZED_STACK;
 static pthread_once_t key_rdy = PTHREAD_ONCE_INIT;
 static pthread_key_t destructor_key = 0;
 
-void *nmalloc(size_t size){
+void *malloc(size_t size){
     trace2(size, lu);
     used_block_t *found = alloc(umax(align_up_pow2(size + sizeof(used_block_t),
                                                    MIN_ALIGNMENT),
                                      MIN_BLOCK));
     return found ? found + 1 : NULL;
 }
-        
-void nfree(void *buf){
+
+void free(void *buf){
     trace2(buf, p);
+    if(!buf)
+        return;
     dealloc((used_block_t *) buf - 1);
 }
 
-void *ncalloc(size_t nmemb, size_t size){
-    void *found = nmalloc(nmemb * size);
+void *calloc(size_t nmemb, size_t size){
+    void *found = malloc(nmemb * size);
     if(!found)
         return NULL;
     memset(found, 0, nmemb * size);
     return found;
+}
+
+void *realloc(void *ptr, size_t size){
+    void *new = malloc(size);
+    if(new){
+        size_t old_size = ((used_block_t *)ptr - 1)->size;
+        memcpy(new, ptr, min(size, old_size));
+    }
+    free(ptr);
+    return ptr;
 }
 
 void block_init(block_t *b, size_t size, size_t l_size){
@@ -378,4 +390,24 @@ int free_arena_valid(arena_t *a){
 
 int used_arena_valid(arena_t *a){
     return 1;
+}
+
+void posix_memalign(){
+    UNIMPLEMENTED();
+}
+
+void aligned_alloc(){
+    UNIMPLEMENTED();
+}
+
+void *valloc(){
+    UNIMPLEMENTED();
+}
+
+void *memalign(){
+    UNIMPLEMENTED();
+}
+
+void *pvalloc(){
+    UNIMPLEMENTED();
 }

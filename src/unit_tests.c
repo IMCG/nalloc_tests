@@ -28,11 +28,11 @@ typedef void *(entrypoint_t)(void *);
 #define kfork(entry, arg, flag)                 \
     pthread_create(&kids[i], NULL, entry, arg)  \
 
-#define wsmalloc(size) nmalloc(size)
-#define wsfree(ptr, size) nfree(ptr)
+/* #define wsmalloc(size) nmalloc(size) */
+/* #define wsfree(ptr, size) nfree(ptr) */
 
-/* #define wsmalloc(size) malloc(size) */
-/* #define wsfree(ptr, size) free(ptr) */
+#define wsmalloc(size) malloc(size)
+#define wsfree(ptr, size) free(ptr)
 
 /* #define NUM_MALLOC_TESTERS 1000 */
 static int num_threads = 1;
@@ -43,7 +43,7 @@ static int ops_mult = 100;
 #define MAX_WRITES  16
 #define REPORT_INTERVAL 100
 
-#define NUM_STACKS 6
+#define NUM_STACKS 1
 #define NUM_LISTS 16
 
 struct tblock_t{

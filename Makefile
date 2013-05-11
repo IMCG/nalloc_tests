@@ -12,8 +12,8 @@ all: utest libnalloc.so
 
 -include $(OBJS:.o=.dep)
 
-# t-test: t-test1.c
-# 	gcc -O3 -lpthread -o $@ $<
+t-test: t-test1.c
+	gcc -O3 -lpthread -o $@ $<
 
 libnalloc.so: $(SRCS)
 		$(CC) $(CFLAGS) -fPIC -shared -o $@ $^
@@ -21,11 +21,11 @@ libnalloc.so: $(SRCS)
 # This is here so that I can set up a scheme where ONLY the test uses
 # nalloc. Better for debugging, as you can't run gdb&co on top of a broken
 # allocator.
-utest: $(OBJS)
-		$(CC) $(LDFLAGS) -o $@ $^
-
-# utest: $(filter-out obj/nalloc.o,$(OBJS))
+# utest: $(OBJS)
 # 		$(CC) $(LDFLAGS) -o $@ $^
+
+utest: $(filter-out obj/nalloc.o,$(OBJS))
+		$(CC) $(LDFLAGS) -o $@ $^
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.c 
 		$(CC) $(CFLAGS) -o $@ -c $<;
