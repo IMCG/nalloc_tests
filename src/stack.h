@@ -18,9 +18,16 @@ typedef struct sanchor_t{
 
 #define INITIALIZED_SANCHOR { .next = NULL }
 
-typedef struct{
-    int64_t tag;
-    sanchor_t *ptr;
+typedef union{
+    struct{
+        int64_t tag;
+        sanchor_t *ptr;
+    };
+    /* This is necessary because casting tagptr_t* to __int128_t* ("type
+       punning") obviously breaks aliasing rules and GCC likes to optimize out
+       things that "can't exist" in standard C. Caused my stack to stop
+       working on -O3 on an older GCC version. */
+    __int128_t raw;
 } tagptr_t;
 
 COMPILE_ASSERT(sizeof(tagptr_t) == 16);

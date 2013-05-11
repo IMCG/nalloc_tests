@@ -54,10 +54,10 @@ sanchor_t *stack_pop(lfstack_t *stack){
         /* Even if out of date, this should always be a readable ptr. */
         new.ptr = old.ptr->next;
     } while(stack->top.tag != old.tag ||
-            cmpxchg128b(*(__int128_t*) &new,
-                        (int128_t*) &stack->top,
-                        *(int128_t*) &old)
-            != *(int128_t*) &old);
+            cmpxchg128b(new.raw,
+                        &stack->top.raw,
+                        old.raw)
+            != old.raw);
                       
     return old.ptr;
 }

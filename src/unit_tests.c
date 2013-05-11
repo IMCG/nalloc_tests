@@ -32,11 +32,11 @@ typedef void *(entrypoint_t)(void *);
 #define wsfree(ptr, size) free(ptr)
 
 static int num_threads = 1;
-static int num_allocations = 20000;
+static int num_allocations = 1000;
 static int ops_mult = 100;
 
 #define NUM_OPS (ops_mult * num_allocations)
-#define MAX_WRITES  MAX_SIZE
+#define MAX_WRITES  32
 #define REPORT_INTERVAL 100
 
 #define NUM_STACKS 1
@@ -73,17 +73,17 @@ int rand_percent(int per_centum){
 }
 
 void write_magics(struct tblock_t *b, int tid){
-    for(int *m = b->magics;
-        (uptr_t) m < (uptr_t) b + umin(b->size - sizeof(*b), MAX_WRITES);
-        m++)
-        *m = tid;
+    size_t max = umin(b->size - sizeof(*b), MAX_WRITES) / sizeof(b->magics[0]);
+    int r = prand();
+    for(int i = 0; i < max; i++)
+        b->magics[(r + i) % max] = tid;
 }
 
 void check_magics(struct tblock_t *b, int tid){
-    for(int *m = b->magics;
-        (uptr_t) m < (uptr_t) b + umin(b->size - sizeof(*b), MAX_WRITES);
-        m++)
-        rassert(*m, ==, tid);
+    size_t max = umin(b->size - sizeof(*b), MAX_WRITES) / sizeof(b->magics[0]);
+    int r = prand();
+    for(int i = 0; i < max; i++)
+        assert(b->magics[(r + i) % max] == tid);
 }
 
 /* Avoiding IFDEF catastrophe with the magic of weak symbols. */
