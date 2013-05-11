@@ -126,18 +126,19 @@ lanchor_t *list_peek(list_t *list){
  */
 lanchor_t *list_pop(list_t *list){
     trace(list, p);
-
-    lanchor_t *outnode;
-
     assert(list_valid_quick(list));
 
-    if(list->head == NULL)
+    lanchor_t *outnode = list->head;
+    if(!outnode)
         return NULL;
 
-    outnode = list->head;
+    *prev_field(outnode->next, list) = NULL;
+    list->head = outnode->next;
 
-    /* Size subtracted inside. */
-    list_remove(outnode, list);
+    list->size--;
+
+    /* /\* Size subtracted inside. *\/ */
+    /* list_remove(outnode, list); */
 
     return outnode;
 }

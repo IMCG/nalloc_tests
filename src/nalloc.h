@@ -27,18 +27,19 @@
 #define MIN_POW 5
 #define MAX_POW 12
 
-#define MAX_BLOCK (const_align_down_pow2(ARENA_SIZE - offsetof(arena_t, heap), \
+#define MAX_BLOCK (const_align_down_pow2(PAGE_SIZE - offsetof(arena_t, heap), \
                                          MIN_BLOCK))
+
 #define MIN_BLOCK (1 << MIN_POW)
 #define MIN_ALIGNMENT 16
 COMPILE_ASSERT(aligned(MIN_BLOCK, MIN_ALIGNMENT));
 COMPILE_ASSERT(aligned(MIN_ALIGNMENT, sizeof(long long)));
 
 static const int blist_size_lookup[] = {
-    32, 48, 64, 80, 112, 256, 512, 1024,
+    32, 48, 64, 80, 96, 112, 256, 512, 1024,
 };
 /* Has to be a natural number for REPEATING_LIST(). */
-#define NBLISTS 8
+#define NBLISTS 9
 COMPILE_ASSERT(ARR_LEN(blist_size_lookup) == NBLISTS);
 
 typedef struct{
@@ -92,13 +93,14 @@ typedef struct  __attribute__ ((packed)){
     block_t heap[];
 } arena_t;
 
+COMPILE_ASSERT(MAX_BLOCK < 1 << MAX_POW);
+
 /* This makes guaranteeing min alignment trivial. */
 COMPILE_ASSERT(aligned(offsetof(arena_t, heap) +
                        offsetof(used_block_t, data),
                        MIN_ALIGNMENT));
-
-/* Depends on arena_t def. */
-COMPILE_ASSERT(MAX_BLOCK < 1 << MAX_POW);
+COMPILE_ASSERT(
+    const_align_up_pow2(MAX_BLOCK + sizeof(arena_t), MIN_ALIGNMENT) <= ARENA_SIZE);
 
 #define INITIALIZED_FREE_ARENA(self_ptr)                                \
     {                                                                   \

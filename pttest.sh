@@ -1,3 +1,3 @@
-./utest 
+./utest $@
 
    

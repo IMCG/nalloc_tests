@@ -35,7 +35,9 @@ __thread list_t priv_arenas = INITIALIZED_LIST;
 /* Warning: It happens to be the case that INITIALIZED_BLIST is a big fat
    NULL. */
 __thread blist_t blists[NBLISTS];
+__attribute__ ((__aligned__(64)))
 __thread lfstack_t priv_wayward_blocks = INITIALIZED_STACK;
+
 
 /* Accounting info for pthread's insane thread destructor setup. */
 static pthread_once_t key_rdy = PTHREAD_ONCE_INIT;
@@ -54,6 +56,14 @@ void nfree(void *buf){
     dealloc((used_block_t *) buf - 1);
 }
 
+void *ncalloc(size_t nmemb, size_t size){
+    void *found = nmalloc(nmemb * size);
+    if(!found)
+        return NULL;
+    memset(found, 0, nmemb * size);
+    return found;
+}
+
 void block_init(block_t *b, size_t size, size_t l_size){
     b->size = size;
     b->free = 1;
@@ -69,6 +79,7 @@ void free_arena_init(arena_t *a){
     assert(aligned(((used_block_t*)&a->heap[0])->data, MIN_ALIGNMENT));
 }
 
+#include <unistd.h>
 arena_t *arena_new(void){
     arena_t *fa = stack_pop_lookup(arena_t, sanc, &free_arenas);
     if(!fa){
@@ -106,14 +117,14 @@ used_block_t *alloc(size_t size){
 
     used_block_t *found;
 
+    found = alloc_from_wayward_blocks(size);
+    if(found)
+        goto done;
+
     for(blist_t *b = blist_larger_than(size); b < &blists[NBLISTS]; b++)
         if( (found = alloc_from_blist(size, b)) )
             goto done;
 
-    found = alloc_from_wayward_blocks(size);
-    if(found)
-        goto done;
-    
     arena_t *a = arena_new();
     if(!a)
         return NULL;
@@ -191,7 +202,8 @@ void dealloc(used_block_t *_b){
 void *merge_adjacent(block_t *b){
     trace3(b, p);
     int loops = 0;
-    block_t *near;    
+    block_t *near;
+
     while( ((near = r_neighbor(b)) && near->free) ||
            ((near = l_neighbor(b)) && near->free) ) 
     {
@@ -221,9 +233,23 @@ void return_wayward_block(wayward_block_t *b, arena_t *arena){
     stack_push(&b->sanc, arena->wayward_blocks);
 }
 
+/* used_block_t *alloc_from_wayward_blocks(size_t size){ */
+/*     wayward_block_t *b = */
+/*         stack_pop_lookup(wayward_block_t, sanc, &priv_wayward_blocks); */
+/*     if(!b) */
+/*         return NULL; */
+/*     if(size <= b->size) */
+/*         return b; */
+/*     else */
+/*         dealloc((used_block_t *) b); */
+/*     return NULL; */
+/* } */
+
+
 used_block_t *alloc_from_wayward_blocks(size_t size){
     wayward_block_t *b, *tmp;
     used_block_t *found = NULL;
+    int loops = 0;
     FOR_EACH_SPOPALL_LOOKUP(b, tmp, wayward_block_t, sanc,
                             &priv_wayward_blocks)
     {
@@ -231,6 +257,7 @@ used_block_t *alloc_from_wayward_blocks(size_t size){
             found = (used_block_t *) b;
         else
             dealloc((used_block_t *) b);
+        loops++;
     }
     return found;
 }

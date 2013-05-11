@@ -14,31 +14,31 @@
 
 /* Aladdin system doesn't have librt installed. I'm sick of wrangling with the
    loader. */
-/* #include <time.h> */
-/* #define TIME(expr)                                                      \ */
-/*     do{                                                                 \ */
-/*         struct timespec __tstart;                                       \ */
-/*         clock_gettime(CLOCK_MONOTONIC, &__tstart);                      \ */
-/*         expr;                                                           \ */
-/*         struct timespec __tend;                                         \ */
-/*         clock_gettime(CLOCK_MONOTONIC, &__tend);                        \ */
-/*         log(#expr ": %f ms", 1000 * (__tend.tv_sec - __tstart.tv_sec) + \ */
-/*             (double) (__tend.tv_nsec - __tstart.tv_nsec) / 1000000.0);  \ */
-/*     }while(0)                                                       \ */
-
-#include <sys/time.h>
-#include <sys/resource.h>
+#include <time.h>
 #define TIME(expr)                                                      \
     do{                                                                 \
-       struct rusage r;                                                 \
-       getrusage(RUSAGE_SELF, &r);                                      \
-       struct timeval __tstart = r.ru_utime;                            \
-       expr;                                                            \
-       getrusage(RUSAGE_SELF, &r);                                      \
-       struct timeval __tend = r.ru_utime;                              \
-       log(#expr ": %lu ms", 1000 * (__tend.tv_sec - __tstart.tv_sec) +  \
-           (__tend.tv_usec - __tstart.tv_usec) / 1000);                 \
+        struct timespec __tstart;                                       \
+        clock_gettime(CLOCK_MONOTONIC, &__tstart);                      \
+        expr;                                                           \
+        struct timespec __tend;                                         \
+        clock_gettime(CLOCK_MONOTONIC, &__tend);                        \
+        log(#expr ": %f ms", 1000 * (__tend.tv_sec - __tstart.tv_sec) + \
+            (double) (__tend.tv_nsec - __tstart.tv_nsec) / 1000000.0);  \
     }while(0)                                                       \
+
+/* #include <sys/time.h> */
+/* #include <sys/resource.h> */
+/* #define TIME(expr)                                                      \ */
+/*     do{                                                                 \ */
+/*        struct rusage r;                                                 \ */
+/*        getrusage(RUSAGE_SELF, &r);                                      \ */
+/*        struct timeval __tstart = r.ru_utime;                            \ */
+/*        expr;                                                            \ */
+/*        getrusage(RUSAGE_SELF, &r);                                      \ */
+/*        struct timeval __tend = r.ru_utime;                              \ */
+/*        log(#expr ": %lu ms", 1000 * (__tend.tv_sec - __tstart.tv_sec) +  \ */
+/*            (__tend.tv_usec - __tstart.tv_usec) / 1000);                 \ */
+/*     }while(0)                                                       \ */
 
 
 /* #include <sys/time.h> */
@@ -100,7 +100,7 @@ static inline uintptr_t ualign_up(uintptr_t addr, size_t size){
     ((n) & ~((size) - 1))
 
 #define const_align_up_pow2(n, size)         \
-    (align_down_pow2((n) + (size) - 1, size))      
+    (const_align_down_pow2((n) + (size) - 1, size))      
 
 #define align_down_pow2(n, size)       \
     (({assert(is_power_of_2(size));}), \

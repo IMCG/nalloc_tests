@@ -1,3 +1,3 @@
-LD_PRELOAD="$PWD/libnalloc.so" ./utest 
+LD_PRELOAD="$PWD/libnalloc.so" ./utest $@
 
    
