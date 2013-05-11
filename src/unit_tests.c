@@ -402,8 +402,8 @@ int main(int argc, char **argv){
     }
 
     /* expose_bug(); */
-    /* TIME(malloc_test_randsize()); */
-    TIME(malloc_test_sharing());
+    TIME(malloc_test_randsize());
+    /* TIME(malloc_test_sharing()); */
     /* TIME(producer_test()); */
 
     void *tst;
