@@ -41,7 +41,7 @@
 
 #include <sys/time.h>
 #define TOD_GETTIME(expr)                                               \
-    do{                                                                 \
+    ({                                                                  \
        struct timeval __tstart;                                         \
        gettimeofday(&__tstart, NULL);                                   \
        expr;                                                            \
@@ -49,10 +49,10 @@
        gettimeofday(&__tend, NULL);                                     \
        1000 * (__tend.tv_sec - __tstart.tv_sec) +                       \
            (double) (__tend.tv_nsec - __tstart.tv_nsec) / 1000000.0;    \
-    }while(0)                                                           \
+       })
 
 
-#define GETTIME(expr) CLOCK_GETTIME(expr)
+#define GETTIME(expr) TOD_GETTIME(expr)
 #define TIME(expr)                                                      \
     do{                                                                 \
         log(#expr ": %f ms", GETTIME((expr)));                          \
