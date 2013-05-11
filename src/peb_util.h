@@ -48,7 +48,7 @@
        struct timeval __tend;                                           \
        gettimeofday(&__tend, NULL);                                     \
        1000 * (__tend.tv_sec - __tstart.tv_sec) +                       \
-           (double) (__tend.tv_nsec - __tstart.tv_nsec) / 1000000.0;    \
+           (double) (__tend.tv_usec - __tstart.tv_usec) / 1000.0;    \
        })
 
 
