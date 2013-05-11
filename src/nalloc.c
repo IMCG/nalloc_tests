@@ -163,13 +163,13 @@ used_block_t *alloc(size_t size){
 
     used_block_t *found;
 
-    found = alloc_from_wayward_blocks(size);
-    if(found)
-        goto done;
-
     for(blist_t *b = blist_larger_than(size); b < &blists[NBLISTS]; b++)
         if( (found = alloc_from_blist(size, b)) )
             goto done;
+
+    found = alloc_from_wayward_blocks(size);
+    if(found)
+        goto done;
 
     arena_t *a = arena_new();
     if(!a)
@@ -279,33 +279,33 @@ void return_wayward_block(wayward_block_t *b, arena_t *arena){
     stack_push(&b->sanc, arena->wayward_blocks);
 }
 
-/* used_block_t *alloc_from_wayward_blocks(size_t size){ */
-/*     wayward_block_t *b = */
-/*         stack_pop_lookup(wayward_block_t, sanc, &priv_wayward_blocks); */
-/*     if(!b) */
-/*         return NULL; */
-/*     if(size <= b->size) */
-/*         return b; */
-/*     else */
-/*         dealloc((used_block_t *) b); */
-/*     return NULL; */
-/* } */
-
 used_block_t *alloc_from_wayward_blocks(size_t size){
-    wayward_block_t *b, *tmp;
-    used_block_t *found = NULL;
-    int loops = 0;
-    FOR_EACH_SPOPALL_LOOKUP(b, tmp, wayward_block_t, sanc,
-                            &priv_wayward_blocks)
-    {
-        if(!found && b->size >= size)
-            found = (used_block_t *) b;
-        else
-            dealloc((used_block_t *) b);
-        loops++;
-    }
-    return found;
+    wayward_block_t *b =
+        stack_pop_lookup(wayward_block_t, sanc, &priv_wayward_blocks);
+    if(!b)
+        return NULL;
+    if(size <= b->size)
+        return (used_block_t *) b;
+    else
+        dealloc((used_block_t *) b);
+    return NULL;
 }
+
+/* used_block_t *alloc_from_wayward_blocks(size_t size){ */
+/*     wayward_block_t *b, *tmp; */
+/*     used_block_t *found = NULL; */
+/*     int loops = 0; */
+/*     FOR_EACH_SPOPALL_LOOKUP(b, tmp, wayward_block_t, sanc, */
+/*                             &priv_wayward_blocks) */
+/*     { */
+/*         if(!found && b->size >= size) */
+/*             found = (used_block_t *) b; */
+/*         else */
+/*             dealloc((used_block_t *) b); */
+/*         loops++; */
+/*     } */
+/*     return found; */
+/* } */
 
 blist_t *blist_larger_than(size_t size){
     trace4(size, lu);

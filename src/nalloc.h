@@ -130,6 +130,11 @@ typedef struct {
     size_t num_arenas_highwater;
 } nalloc_profile_t;
 
+
+typedef struct  __attribute__ ((packed)){
+    lfstack_t *wayward_blocks;
+} slab_t;
+
 void *nmalloc(size_t size);
 void nfree(void *buf);
 

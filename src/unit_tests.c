@@ -426,7 +426,7 @@ int main(int argc, char **argv){
     int program = 1;
 
     int opt;
-    while( (opt = getopt(argc, argv, "t:a:o:")) != -1 ){
+    while( (opt = getopt(argc, argv, "t:a:o:p:w:l")) != -1 ){
         switch (opt){
         case 't':
             num_threads = atoi(optarg);
@@ -439,12 +439,17 @@ int main(int argc, char **argv){
             break;
         case 'p':
             program = atoi(optarg);
+            break;
         case 'w':
             max_writes = atoi(optarg);
+            break;
         case 'l':
             print_profile = 1;
+            break;
         }
     }
+
+    PINT(print_profile);
 
     profile_init();
 
