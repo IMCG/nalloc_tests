@@ -12,7 +12,9 @@
 
 #include <list.h>
 #include <peb_macros.h>
+#include <peb_util.h>
 #include <pthread.h>
+#include <refcount.h>
 #include <stack.h>
 
 #ifdef HIDE_NALLOC
@@ -24,9 +26,8 @@
 
 #define NALLOC_MAGIC_INT 0x999A110C
 
-#define CACHE_SHIFT 6
-
-#define CACHE_SIZE (1 << 6)
+#define CACHELINE_SHIFT 6
+#define CACHELINE_SIZE (1 << 6)
 
 #define PAGE_SHIFT 12
 #define PAGE_SIZE (1 << PAGE_SHIFT)
@@ -37,34 +38,58 @@
 #define SLAB_ALLOC_BATCH 16
 #define IDEAL_FULL_SLABS 5
 
-#define MAX_BLOCK (const_align_down_pow2(PAGE_SIZE - sizeof(slab_t), MIN_ALIGNMENT))
+#define MIN_BLOCK 16
+#define MAX_BLOCK (SLAB_SIZE / 8)
 
-static const int cache_size_lookup[] = {
-    16, 24, 32, 48, 64, 80, 96, 112, 256, 512, 1024,
+static const int bcache_size_lookup[] = {
+    16, 24, 32, 48, 64, 80, 96, 112, 256, 512, 
 };
-#define NBLISTS ARR_LEN(blist_size_lookup)
+#define NBSTACKS ARR_LEN(bcache_size_lookup)
 
 typedef struct{
+    size_t size;
+} large_block_t;
+
+typedef struct{
+    __attribute__((__aligned__(MIN_ALIGNMENT)))
     sanchor_t sanc;
-} block_t __attribute__((__aligned__(4)));
+} block_t;
 COMPILE_ASSERT(sizeof(block_t) <= MIN_BLOCK);
 
 typedef struct{
-    lfstack_t slabs[NBLISTS];
-} cache_t __attribute__((__aligned__(64)));
+    lfstack_t blocks[NBSTACKS];
+    refcount_t refs;
+} wayward_bcache_t __attribute__((__aligned__(CACHELINE_SIZE)));
 
 typedef struct{
-    lfstack_t blocks[NBLISTS];
-} wayward_cache_t __attribute__((__aligned__(64)));
-
-COMPILE_ASSERT(sizeof(large_block_t) != sizeof(slab_t));
-
-typedef struct{
-    stack_t blocks;
+    wayward_bcache_t *wayward_blocks;
+    simpstack_t hot_blocks;
     sanchor_t sanc;
     unsigned int nblocks_contig;
+    size_t block_size;
     block_t blocks[];
 } slab_t;
+
+#define FRESH_SLAB {                            \
+        .wayward_blocks = NULL,                 \
+            .hot_blocks = FRESH_STACK,          \
+            .sanc = FRESH_SANCHOR,              \
+            .nblocks_contig = 0,                \
+            .block_size = 0,                    \
+            }
+
+COMPILE_ASSERT(sizeof(large_block_t) != sizeof(slab_t));
+COMPILE_ASSERT(aligned_pow2(sizeof(slab_t), MIN_ALIGNMENT));
+
+
+typedef struct{
+    uint32_t nblocks;
+    wayward_bcache_t bcaches[];
+} wayward_bcache_slab_t;
+
+#define FRESH_WAYWARD_BCACHE_SLAB {.nblocks = 0}
+
+COMPILE_ASSERT(sizeof(large_block_t) != sizeof(slab_t));
 
 typedef struct {
     size_t num_bytes;
@@ -73,53 +98,42 @@ typedef struct {
     size_t num_slabs_highwater;
 } nalloc_profile_t;
 
-void *nmalloc(size_t size);
-void nfree(void *buf);
+void *malloc(size_t size);
+void free(void *buf);
+void *calloc(size_t nmemb, size_t size);
+void *realloc(void *ptr, size_t size);
 
-void nalloc_init(void);
-slab_t *slab_new(void);
-void slab_free(slab_t *slab);               
-void free_slab_init(slab_t *a);
-void slab_init(slab_t *slab);
+static void *large_alloc(size_t size);
+static void large_dealloc(large_block_t *block);
 
-void *large_alloc(size_t size);
-void large_dealloc(large_block_t *block);
+static int round_and_get_bcacheidx(size_t *size);
 
-used_block_t *alloc(size_t size);
-used_block_t *alloc_from_blist(size_t enough, blist_t *bl);
-used_block_t *alloc_from_block(block_t *block, size_t size);
-used_block_t *shave(block_t *b, size_t enough);
+static void *alloc(size_t size);
 
-void dealloc(used_block_t *_b);
-void *merge_adjacent(block_t *b);
+static int slab_is_hot(slab_t *slab);
+static int slab_is_empty(slab_t *slab);
+static void *alloc_from_slab(slab_t *slab);
+static slab_t *slab_install_new(size_t size, int sizeidx);
+static void slab_free(slab_t *freed);
 
-void return_wayward_block(wayward_block_t *b, slab_t *slab);
-used_block_t *alloc_from_wayward_blocks(size_t size);
+static block_t *alloc_from_wayward_blocks(int cidx);
 
-void block_init(block_t *b, size_t size, size_t l_size);
-int supports_alignment(block_t *b, size_t enough, size_t alignment);
+static void dealloc(block_t *b);
+static void return_wayward_block(block_t *b, slab_t *slab, int cidx);
 
-blist_t *blist_smaller_than(size_t size);
-blist_t *blist_larger_than(size_t size);
+static slab_t *slab_of(block_t *b);
 
-block_t *r_neighbor(block_t *b);
-block_t *l_neighbor(block_t *b);
+static void free_slabs_atexit();
+static void jump_through_hoop(void);
+static int dynamic_init(void);
+static int wayward_bcache_install_new(void);
+static void wayward_bcache_free(wayward_bcache_t *c);
 
-void free_slabs_atexit();
-int register_thread_destructor(void);
+static void profile_bytes(size_t nbytes);
+static void profile_slabs(size_t nslabs);
+nalloc_profile_t *get_profile(void);
 
-slab_t *slab_of(block_t *b);
-int is_junk_block(block_t *b);
+static int write_block_magics(block_t *b);
+static int block_magics_valid(block_t *b);
 
-void profile_bytes(size_t nbytes);
-void profile_slabs(size_t nslabs);
-
-int free_slab_valid(slab_t *a);
-int used_slab_valid(slab_t *a);
-
-int free_block_valid(block_t *b);
-int used_block_valid(used_block_t *b);
-int write_block_magics(block_t *b);
-int block_magics_valid(block_t *b);
-   
 #endif

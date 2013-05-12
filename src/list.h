@@ -26,14 +26,14 @@ typedef struct {
     unsigned int size;
 } list_t;
 
-#define INITIALIZED_LANCHOR                     \
+#define FRESH_LANCHOR                     \
     {                                           \
         .next = NULL,                           \
             .prev = NULL,                       \
             }
 
 
-#define INITIALIZED_LIST                        \
+#define FRESH_LIST                        \
     {                                           \
             .head = NULL,                       \
             .tail = NULL,                       \

@@ -163,7 +163,7 @@ void mt_child_rand(int parent_tid){
 
     prand_init();
     for(int i = 0; i < NUM_LISTS; i++)
-        block_lists[i] = (list_t) INITIALIZED_LIST;
+        block_lists[i] = (list_t) FRESH_LIST;
     
     while(rdy == FALSE)
         _yield(parent_tid);
@@ -183,7 +183,7 @@ void mt_child_rand(int parent_tid){
             if(!cur_block)
                 continue;
             *cur_block = (struct tblock_t)
-                { . size = size, .lanc = INITIALIZED_LANCHOR };
+                { . size = size, .lanc = FRESH_LANCHOR };
             write_magics(cur_block, tid);
             list_add_rear(&cur_block->lanc, blocks);
         }else if(blocks->size){
@@ -218,7 +218,7 @@ void malloc_test_sharing(){
     struct child_args shared;
     shared.parent_tid = _gettid();
     for(int i = 0; i < NUM_STACKS; i++)
-        shared.block_stacks[i] = (lfstack_t) INITIALIZED_STACK;
+        shared.block_stacks[i] = (lfstack_t) FRESH_STACK;
 
     pthread_t kids[num_threads];
     for(int i = 0; i < num_threads; i++)
@@ -242,7 +242,7 @@ void mt_sharing_child(struct child_args *shared){
 
     list_t priv_blocks[NUM_LISTS];
     for(int i = 0; i < NUM_LISTS; i++)
-        priv_blocks[i] = (list_t) INITIALIZED_LIST;
+        priv_blocks[i] = (list_t) FRESH_LIST;
 
     int num_blocks = 0;
     for(int i = 0; i < NUM_OPS; i++){
@@ -261,7 +261,7 @@ void mt_sharing_child(struct child_args *shared){
                 continue;
             log2("Allocated: %p", cur_block);
             *cur_block = (struct tblock_t)
-                { .size = size, .sanc = INITIALIZED_SANCHOR };
+                { .size = size, .sanc = FRESH_SANCHOR };
             /* Try to trigger false sharing. */
             write_magics(cur_block, tid);
             stack_push(&cur_block->sanc, blocks);
@@ -273,7 +273,7 @@ void mt_sharing_child(struct child_args *shared){
                 continue;
             log2("Claiming: %p", cur_block);
             write_magics(cur_block, tid);
-            cur_block->lanc = (lanchor_t) INITIALIZED_LANCHOR;
+            cur_block->lanc = (lanchor_t) FRESH_LANCHOR;
             list_add_front(&cur_block->lanc, &priv_blocks[prand() % NUM_LISTS]);
         }
 
@@ -301,7 +301,7 @@ void producer_test(void){
     struct child_args shared;
     shared.parent_tid = _gettid();
     for(int i = 0; i < NUM_STACKS; i++)
-        shared.block_stacks[i] = (lfstack_t) INITIALIZED_STACK;
+        shared.block_stacks[i] = (lfstack_t) FRESH_STACK;
 
     pthread_t kids[num_threads];
     for(int i = 0; i < num_threads; i++)
@@ -327,7 +327,7 @@ void produce(struct child_args *shared){
     int tid = _gettid();
     prand_init();
 
-    lfstack_t priv_blocks = (lfstack_t) INITIALIZED_STACK;
+    lfstack_t priv_blocks = (lfstack_t) FRESH_STACK;
     struct tblock_t *cur_block;
     int num_blocks = 0;
     for(int i = 0; i < NUM_OPS; i++){
@@ -346,7 +346,7 @@ void produce(struct child_args *shared){
                 continue;
             log2("Allocated: %p", cur_block);
             *cur_block = (struct tblock_t)
-                { .size = size, .sanc = INITIALIZED_SANCHOR };
+                { .size = size, .sanc = FRESH_SANCHOR };
             /* Try to trigger false sharing. */
             write_magics(cur_block, tid);
             stack_push(&cur_block->sanc, blocks);
@@ -384,7 +384,7 @@ void consumer_child(struct child_args *shared){
     while(rdy == FALSE)
         _yield(parent_tid);
 
-    lfstack_t priv_blocks = INITIALIZED_STACK;
+    lfstack_t priv_blocks = FRESH_STACK;
     int num_blocks = 0;
     for(int i = 0; i < NUM_OPS; i++){
         lfstack_t *blocks= &shared->block_stacks[prand() % NUM_STACKS];

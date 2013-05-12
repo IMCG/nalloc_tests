@@ -16,7 +16,7 @@ typedef struct sanchor_t{
     struct sanchor_t *next;
 } sanchor_t;
 
-#define INITIALIZED_SANCHOR { .next = NULL }
+#define FRESH_SANCHOR { .next = NULL }
 
 typedef union{
     struct{
@@ -37,10 +37,14 @@ typedef struct{
     tagptr_t top __attribute__((__aligned__ (16)));
 }lfstack_t;
 
-#define INITIALIZED_STACK                       \
+#define FRESH_STACK                       \
     {                                           \
         .top = {0, NULL},                       \
     }
+                                                                        
+void stack_push(sanchor_t *anc, lfstack_t *stack);
+sanchor_t *stack_pop(lfstack_t *stack);
+sanchor_t *stack_pop_all(lfstack_t *stack);
 
 #define lookup_sanchor(ptr, container_type, field)    \
     container_of(ptr, container_type, field)          
@@ -55,6 +59,7 @@ typedef struct{
         cur_struct = stack_pop_lookup(struct_type, field_name, stack)   \
         )                                                               \
 
+/* Hey! You! Close your eyes for a sec. */
 #define FOR_EACH_SPOPALL_LOOKUP(cur_struct, tmp, struct_type, field_name, stack) \
     for(                                                                \
         (cur_struct = lookup_sanchor(stack_pop_all(stack),              \
@@ -73,10 +78,21 @@ typedef struct{
                               field_name)                               \
                : NULL)                                                  \
         )                                                               \
+/* You can open your eyes now. */
+    
 
+typedef struct simpstack_t{
+    sanchor_t *top;
+    size_t size;
+} simpstack_t;
 
-void stack_push(sanchor_t *anc, lfstack_t *stack);
-sanchor_t *stack_pop(lfstack_t *stack);
-sanchor_t *stack_pop_all(lfstack_t *stack);
+#define FRESH_SIMPSTACK {.top = NULL, .size = 0 }
+
+void simpstack_push(sanchor_t *sanc, simpstack_t *stack);
+sanchor_t *simpstack_pop(simpstack_t *stack);
+sanchor_t *simpstack_peek(simpstack_t *stack);
+
+#define simpstack_pop_lookup(container_type, field, stack)      \
+    lookup_sanchor(simpstack_pop(stack), container_type, field) 
 
 #endif
