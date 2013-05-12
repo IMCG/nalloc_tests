@@ -62,8 +62,10 @@ sanchor_t *stack_pop(lfstack_t *stack){
     return old.ptr;
 }
 
-sanchor_t *stack_pop_all(lfstack_t *stack){
+slist_t *stack_pop_all(lfstack_t *stack){
     if(!stack->top.ptr)
         return NULL;
     return (sanchor_t *) xchg64b((int64_t) NULL, (int64_t *) &stack->top.ptr);
 }
+
+

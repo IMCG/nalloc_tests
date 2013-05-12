@@ -132,7 +132,7 @@ void profile_report(void){
     if(get_profile){
         nalloc_profile_t *prof = get_profile();
         PLUNT(prof->num_bytes_highwater);
-        PLUNT(prof->num_arenas_highwater);
+        PLUNT(prof->num_slabs_highwater);
     }
 
     pthread_mutex_unlock(&report_lock);

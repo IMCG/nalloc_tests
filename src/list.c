@@ -143,6 +143,18 @@ lanchor_t *list_pop(list_t *list){
     return outnode;
 }
 
+lanchor_t *list_pop_all(list_t *list){
+    trace(list, p);
+    assert(list_valid_quick(list));
+
+    lanchor_t *out = list->head;
+
+    list->head = list->tail = NULL;
+    list->size = 0;
+    
+    return out;
+}
+
 /** 
  * @brief Remove 'anchor' from 'list'.
  *

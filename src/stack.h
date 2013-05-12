@@ -26,7 +26,8 @@ typedef union{
     /* This is necessary because casting tagptr_t* to __int128_t* ("type
        punning") obviously breaks aliasing rules and GCC likes to optimize out
        things that "can't exist" in standard C. Caused my stack to stop
-       working on -O3 on an older GCC version. */
+       working on -O3 on the cluster GCC version, but not at home. That was a
+       fun debugging adventure. */
     __int128_t raw;
 } tagptr_t;
 

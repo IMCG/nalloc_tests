@@ -54,6 +54,23 @@ typedef struct {
         cur_struct = lookup_lanchor(cur_struct->field_name.next,    \
                                     struct_type,                    \
                                     field_name))
+
+#define FOR_EACH_LPOP(cur_struct, tmp, struct_type, field_name, list)   \
+    for(                                                                \
+        cur_struct = lookup_lanchor(list_pop_all(list), struct_type,    \
+                                    field_name)                         \
+            , tmp = cur_struct ?                                        \
+            lookup_lanchor(cur_struct->field_name.next,                 \
+                           struct_type,                                 \
+                           field_name)                                  \
+            : NULL;                                                     \
+        cur_struct != NULL;                                             \
+        cur_struct = tmp                                                \
+            , tmp = cur_struct ?                                        \
+            lookup_lanchor(cur_struct->field_name.next,                 \
+                           struct_type,                                 \
+                           field_name))
+
 /** 
  * @brief Pop the head of the given list, and then translate the resulting
  * anchor address to the address of the struct in which that anchor is
@@ -93,6 +110,7 @@ void list_add_before(lanchor_t *anchor, lcomp_t *comp,
 lanchor_t *list_peek(list_t *list);
 
 lanchor_t *list_pop(list_t *list);
+lanchor_t *list_pop_all(list_t *list);
 void list_remove(lanchor_t *anchor, list_t *list);
 
 lanchor_t *list_find(lcomp_t comparator, void *key, list_t *list);
