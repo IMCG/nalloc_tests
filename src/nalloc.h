@@ -26,6 +26,10 @@
 
 #define NALLOC_MAGIC_INT 0x999A110C
 
+/* TODO: I know this is non-portable. I just don't want to bother generating
+   my own tids.  */
+#define INVALID_TID 0
+
 #define CACHELINE_SHIFT 6
 #define CACHELINE_SIZE (1 << 6)
 
@@ -57,24 +61,10 @@ typedef struct{
 COMPILE_ASSERT(sizeof(block_t) <= MIN_BLOCK);
 
 typedef struct{
-    int use_slab_instead;
-    refcount_t refs;
-    /* If HAS_ONE_BSTACK, then just the one stack. If HAS_MANY_BSTACKS, then
-       this is actually NBSTACKS. */
-    lfstack_t bstacks[1];
-} wayward_bcache_t;
-
-typedef struct{
-    wayward_bcache_t base;
-    lfstack_t bstacks[NBSTACKS - 1];
-} big_wayward_bcache_t __attribute__((__aligned__(CACHELINE_SIZE)));
-
-typedef struct{
-    wayward_bcache_t disowned_blocks;
-    /* Dear GCC: don't be clever by making repeated reads rather than storing
-       in a register. Not sure if necessary. */
-    wayward_bcache_t *volatile wayward_blocks;
-    simpstack_t hot_blocks;
+    lfstack_t wayward_blocks;
+    unsigned int num_wayward_blocks;
+    simpstack_t priv_blocks;
+    pthread_t host_tid;
     sanchor_t sanc;
     unsigned int nblocks_contig;
     size_t block_size;
@@ -84,27 +74,16 @@ typedef struct{
 /* Note that the refcnt here is a dummy val. It should never reach zero. */
 /* Ignore emacs' crazy indentation. There's no simple way to fix it. */
 #define FRESH_SLAB {                                            \
-        .disowned_blocks = { .type = HAS_ONE_BSTACK,            \
-                             .refs = FRESH_REFCOUNT(15418)},    \
-            .wayward_blocks = NULL,                             \
-                 .hot_blocks = FRESH_SIMPSTACK,                 \
-                 .sanc = FRESH_SANCHOR,                         \
-                 .nblocks_contig = 0,                           \
-                 .block_size = 0,                               \
+        .wayward_blocks = FRESH_STACK,                          \
+            .priv_blocks = FRESH_SIMPSTACK,                     \
+            .host_tid = INVALID_TID,                            \
+            .sanc = FRESH_SANCHOR,                              \
+            .nblocks_contig = 0,                                \
+            .block_size = 0,                                    \
                  }
 
 COMPILE_ASSERT(sizeof(large_block_t) != sizeof(slab_t));
 COMPILE_ASSERT(aligned_pow2(sizeof(slab_t), MIN_ALIGNMENT));
-
-
-typedef struct{
-    uint32_t nblocks;
-    wayward_bcache_t bcaches[];
-} wayward_bcache_slab_t;
-
-#define FRESH_WAYWARD_BCACHE_SLAB {.nblocks = 0}
-
-COMPILE_ASSERT(sizeof(large_block_t) != sizeof(slab_t));
 
 typedef struct {
     size_t num_bytes;
@@ -128,11 +107,10 @@ static void *alloc(size_t size);
 static int slab_is_hot(slab_t *slab);
 static int slab_is_empty(slab_t *slab);
 static unsigned int slab_compute_nblocks(size_t block_size);
-static void *alloc_from_slab(slab_t *slab);
+static block_t *alloc_from_slab(slab_t *slab);
+static block_t *dealloc_from_slab(block_t *b, slab_t *s);
 static slab_t *slab_install_new(size_t size, int sizeidx);
 static void slab_free(slab_t *freed, int cidx);
-
-static block_t *alloc_from_wayward_blocks(int cidx);
 
 static void dealloc(block_t *b);
 static void return_wayward_block(block_t *b, slab_t *slab, int cidx);
@@ -142,8 +120,6 @@ static slab_t *slab_of(block_t *b);
 static void free_slabs_atexit();
 static void jump_through_hoop(void);
 static int dynamic_init(void);
-static int wayward_bcache_install_new(void);
-static void wayward_bcache_free(wayward_bcache_t *c);
 
 static void profile_bytes(size_t nbytes);
 static void profile_slabs(size_t nslabs);

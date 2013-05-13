@@ -30,30 +30,19 @@
 #include <nalloc.h>
 #include <global.h>
 
-static ref_class_t wayward_bcache_ref_class = {
-    .destructor = (void (*)(void*)) &wayward_bcache_free,
-    .container_offset = offsetof(wayward_bcache_t, refs),
-};
-
-__attribute__ ((__aligned__(64)))
-/* Cold slabs are those which have all blocks free and none of the are on the
-   hot_blocks stack. */
-static lfstack_t cold_slabs = FRESH_STACK;
-
 /* DANGER: It happens to be the case that an uninitialized lfstack is all
    0. If that's not true, then you need a barrier during first time init
    (pthread_once won't suffice). */
-__attribute__ ((__aligned__(64)))
-/* TODO: Don't want hot_slabs */
-/* Hot slabs are those which have blocks free the hot_blocks stack. */
-static lfstack_t hot_slabs[NBSTACKS];
+__attribute__ ((__aligned__(CACHELINE_SIZE)))
+static lfstack_t dirty_slabs[NBSTACKS];
 
-__attribute__ ((__aligned__(64)))
+__attribute__ ((__aligned__(CACHELINE_SIZE)))
+static lfstack_t clean_slabs = FRESH_STACK;
+
+static __thread simpstack_t priv_slabs[NBSTACKS];
+
+__attribute__ ((__aligned__(CACHELINE_SIZE)))
 static __thread nalloc_profile_t profile;
-
-/* Initialized in dynamic_init() */
-static __thread simpstack_t slab_cache[NBSTACKS];
-static __thread wayward_bcache_t *wayward_bcache;
 
 /* Accounting info for pthread's wonky thread destructor setup. */
 static pthread_once_t key_rdy = PTHREAD_ONCE_INIT;
@@ -140,12 +129,9 @@ void *alloc(size_t size){
     int cidx = bcacheidx_of(size);
     size_t rounded = bcache_size_lookup[cidx];
     
-    slab_t *slab = lookup_sanchor(simpstack_peek(&slab_cache[cidx]),
+    slab_t *slab = lookup_sanchor(simpstack_peek(&priv_slabs[cidx]),
                                   slab_t, sanc);
     if(!slab){
-        found = alloc_from_wayward_blocks(cidx);
-        if(found)
-            goto done;
         slab = slab_install_new(rounded, cidx);
         if(!slab)
             return NULL;
@@ -156,9 +142,8 @@ void *alloc(size_t size){
         return NULL;
     
     if(slab_is_empty(slab))
-        simpstack_pop(&slab_cache[cidx]);
+        simpstack_pop(&priv_slabs[cidx]);
     
-done:
     assert(found);
     rassert(slab_of(found)->block_size, >=, size);
     assert(aligned(found, MIN_ALIGNMENT));
@@ -166,21 +151,22 @@ done:
 }
 
 static
-block_t *alloc_from_wayward_blocks(int cidx){
-    return
-        stack_pop_lookup(block_t, sanc,
-                         &wayward_bcache->bstacks[cidx]);
+int slab_is_on_priv_stack(slab_t *slab){
+    /* Note that this doesn't count wayward blocks. If a slab is filling up
+       with only wayward blocks, it doesn't get put into the cache. If it
+       fills up all the way, it gets freed or stolen. */
+    return slab->priv_blocks.size || slab->nblocks_contig;
 }
 
 static
-int slab_is_empty(slab_t *slab){
-    return slab->hot_blocks.size == 0 && slab->nblocks_contig == 0;
+int slab_num_priv_blocks(slab_t *slab){
+    return slab->priv_blocks.size + slab->nblocks_ 
 }
 
-/* A slab's hotness is indep. of its emptyness. */
+
 static
-int slab_is_hot(slab_t *slab){
-    return slab->nblocks_contig == 0;
+int slab_is_dirty(slab_t *slab){
+    return slab->wayward_blocks.top.ptr != NULL;
 }
 
 static 
@@ -189,18 +175,28 @@ unsigned int slab_compute_nblocks(size_t block_size){
 }
 
 static
-void *alloc_from_slab(slab_t *slab){
-    if(!slab_is_hot(slab))
+block_t *alloc_from_slab(slab_t *slab){
+    if(slab->nblocks_contig)
         return &slab->blocks[slab->block_size * --slab->nblocks_contig];
-    return simpstack_pop_lookup(block_t, sanc, &slab->hot_blocks);
+    block_t *found = simpstack_pop_lookup(block_t, sanc, &slab->priv_blocks);
+    if(!found)
+        found = lookup_sanchor(stack_pop_all(&slab->wayward_blocks),
+                               block_t, sanc);
+    if(found)
+        simpstack_replace(found->sanc.next, &slab->priv_blocks);
+    return found;
 }
 
 static
 slab_t *slab_install_new(size_t size, int sizeidx){
-    slab_t *found = stack_pop_lookup(slab_t, sanc, &hot_slabs[sizeidx]);
+    trace2(size, lu, sizeidx, d);
+    
+    slab_t *found = stack_pop_lookup(slab_t, sanc, &clean_slabs);
     if(!found){
-        found = stack_pop_lookup(slab_t, sanc, &cold_slabs);
+        found = stack_pop_lookup(slab_t, sanc, &dirty_slabs[sizeidx]);
         if(!found){
+            /* Note the use of MAP_POPULATE to escape page faults that *will*
+               otherwise happen due to overcommit. */
             found = mmap(NULL, SLAB_SIZE * SLAB_ALLOC_BATCH,
                          PROT_READ | PROT_WRITE,
                          MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS,
@@ -212,31 +208,31 @@ slab_t *slab_install_new(size_t size, int sizeidx){
             for(int i = 1; i < SLAB_ALLOC_BATCH; i++){
                 slab_t *extra = (slab_t*) ((uptr_t) found + i * SLAB_SIZE);
                 *extra = (slab_t) FRESH_SLAB;
-                stack_push(&extra->sanc, &cold_slabs);
+                stack_push(&extra->sanc, &clean_slabs);
             }
             *found = (slab_t) FRESH_SLAB;
+            found->block_size = size;
+            found->nblocks_contig = slab_compute_nblocks(size);
         }
+    }
 
-        found->block_size = size;
-        found->nblocks_contig = slab_compute_nblocks(size);
-    }else
-        assert(slab_is_hot(found));
-
+    assert(found->host_tid == INVALID_TID);
     assert(found->block_size == size);
+
+    found->host_tid = pthread_self();
 
     profile_slabs(1);
     return found;
 }
 
-static
-void slab_free(slab_t *freed, int cidx){
-    assert(slab_is_hot(freed));
-    /* Shouldn't be freeing slabs that have unfreed blocks that can go
-       wayward. */
-    freed->wayward_blocks = NULL;
-    stack_push(&freed->sanc, &hot_slabs[cidx]);
-    profile_slabs(-1);
-}
+/* static */
+/* void try_freeing_head_slab(int cidx){ */
+/*     sanchor_t top = simpstack_peek(&priv_slabs[cidx]); */
+/*     if(priv_slabs) */
+/*     s->host_tid = INVALID_TID; */
+/*     stack_push(&s->sanc, &clean_slabs); */
+/*     profile_slabs(-1); */
+/* } */
 
 static
 void dealloc(block_t *b){
@@ -245,32 +241,49 @@ void dealloc(block_t *b){
     slab_t *s = slab_of(b);
     int cidx = bcacheidx_of(s->block_size);
 
-    if(s->wayward_blocks == wayward_bcache){
-        simpstack_push(&b->sanc, &s->hot_blocks);
+    if(s->host_tid == pthread_self()){
+        simpstack_push(&b->sanc, &s->priv_blocks);
         if(slab_is_empty(s)){
             /* Slab becomes cold again. This has the advantage of making
                allocations sequential and thus cache and prefetch friendly. */
-            s->nblocks_contig = slab_compute_nblocks(s->block_size);
-            simpstack_push(&s->sanc, &slab_cache[cidx]);
+            simpstack_push(&s->sanc, &priv_slabs[cidx]);
         }
-        /* TODO: release back to system. */
+        
+        dealloc_from_slab(b, s);
+        if(slab_is_full(s) && priv_slabs[cidx].size >= IDEAL_NUM_SLABS)
+            /* try_freeing_head_slab(cidx); */
+            /* Consider freeing. */
     }
     else
         return_wayward_block(b, s, cidx);
 }
 
 static
-void return_wayward_block(block_t *b, slab_t *slab, int cidx){
-    wayward_bcache_t *waycache = slab->wayward_blocks;
-    if(waycache->type == HAS_ONE_BSTACK)
-        stack_push(&b->sanc, &waycache->bstacks[0]);
-    else if(waycache->type == HAS_MANY_BSTACKS){
-        /* Why is it safe to take a ref here? Because the waycache won't be freed
-           until all missing blocks are returned. */
-        ref_up(&waycache->refs, 1, &wayward_bcache_ref_class);
-        stack_push(&b->sanc,
-                   &slab->wayward_blocks->bstacks[bcacheidx_of(slab->size)]);
-        ref_down(&waycache->refs, 1, &wayward_bcache_ref_class);
+block_t *dealloc_from_slab(block_t *b, slab_t *s){
+    if(b == slab->blocks[s->nblocks_contig])
+        slab->nblocks_contig++;
+    else
+        simpstack_push(&b->sanc, &s->priv_blocks);
+}
+
+static
+void return_wayward_block(block_t *b, slab_t *s, int cidx){
+    if(slab_is_full() && !slab_is_on_priv_stack())
+        steal_or_dealloc_slab(s, cidx);
+    else
+        stack_push(&b->sanc, &s->wayward_blocks);
+        
+}
+
+static
+void steal_or_dealloc_slab(slab_t *s, int cidx){
+    if(priv_slabs[cidx].size < IDEAL_NUM_SLABS){
+        slab->host_tid = pthread_self();
+        simpstack_push(&s->sanc, &priv_slabs[cidx]);
+    }
+    else{
+        slab->host_tid = INVALID_TID;
+        stack_push(&s->sanc, &cold_stacks);
     }
 }
 
@@ -286,7 +299,6 @@ void free_slabs_atexit(){
     slab_t *cur;
     FOR_EACH_LLOOKUP(cur, slab_t, lanc, &priv_slabs)
         cur->wayward_blocks = &cur->disowned_blocks;
-    ref_down(&wayward_bcache, 1, &wayward_bcache_refclass);
 }
 
 static
@@ -297,51 +309,12 @@ void first_time_init(void){
 static
 int dynamic_init(void){
     if(!wayward_bcache){
-        if(!wayward_bcache_install_new())
-            return -1;
         pthread_once(&key_rdy, first_time_init);
         if(pthread_setspecific(destructor_key, (void*) !NULL))
             return -1;
         destructor_rdy = 1;
     }
     return 0;
-}
-
-static
-int wayward_bcache_install_new(void){
-    assert(!wayward_bcache);
-    
-    /* Are you ready for this? */
-    static char unused_byte_of_memory;
-    /* To prevent infinite recursion. */
-    wayward_bcache = (big_wayward_bcache_t *) &unused_byte_of_memory;
-    wayward_bcache = alloc(sizeof(big_wayward_bcache_t));
-    if(!wayward_bcache)
-        return -1;
-
-    wayward_bcache->type_tag = HAS_MANY_BSTACKS;
-    wayward_bcache->refs = INITIALIZED_REFCOUNT(1);
-    for(int i = 0; i < NBSTACKS; i++)
-        wayward_bcache->blocks[i] = INITIALIZED_STACK;
-    
-    slab_t *host_slab = slab_of(wayward_bcache);
-    host_slab->wayward_blocks =
-        &wayward_bcache->blocks[bcacheidx_of(host_slab)];
-    /* /puts_on_sunglasses. */
-}
-
-/* Called via refcnt destructor. */
-static
-void wayward_bcache_free(wayward_bcache *bcache){
-    for(int i = 0; i < bcache->nstacks; i++){
-        block_t *wayward_block;
-        FOR_EACH_SPOP_LOOKUP(block_t, sanc, &bcache->bstacks[i]){
-            assert(slab_of(wayward_block)->wayward_blocks, ==,
-                   &slab_of(wayward_block)->wayward_blocks bcache);
-            dealloc(wayward_blocks);
-        }
-    }
-    dealloc(bcache);
 }
 
 static

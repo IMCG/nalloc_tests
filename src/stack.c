@@ -85,6 +85,12 @@ sanchor_t *simpstack_pop(simpstack_t *stack){
     return out;
 }
 
+void simpstack_replace(sanchor_t *new_head, simpstack_t *stack){
+    assert(stack->top == NULL);
+    stack->top = new_head;
+}
+
+
 sanchor_t *simpstack_peek(simpstack_t *stack){
     return stack->top;
 }

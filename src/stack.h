@@ -20,7 +20,10 @@ typedef struct sanchor_t{
 
 typedef union{
     struct{
-        int64_t tag;
+        union{
+            int32_t tag;
+            int32_t size;
+        }
         sanchor_t *ptr;
     };
     /* This is necessary because casting tagptr_t* to __int128_t* ("type
@@ -91,6 +94,7 @@ typedef struct simpstack_t{
 void simpstack_push(sanchor_t *sanc, simpstack_t *stack);
 sanchor_t *simpstack_pop(simpstack_t *stack);
 sanchor_t *simpstack_peek(simpstack_t *stack);
+void simpstack_replace(sanchor_t *new_head, simpstack_t *stack);
 
 #define simpstack_pop_lookup(container_type, field, stack)      \
     lookup_sanchor(simpstack_pop(stack), container_type, field) 
