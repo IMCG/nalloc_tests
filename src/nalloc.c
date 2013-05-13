@@ -278,7 +278,6 @@ slab_t *slab_install_new(size_t size, int cidx){
         }
     }
 
-
     assert(found->host_tid == INVALID_TID);
     assert(found->block_size == size);
 

@@ -32,12 +32,12 @@ static int ops_mult = 1000;
 static int max_writes = 0;
 static int print_profile = 0;
 
-#define NUM_OPS (ops_mult * num_allocations)
+#define NUM_OPS ((ops_mult * num_allocations) / num_threads)
 
 #define NUM_STACKS 16
 #define NUM_LISTS 16
 
-#define MAX_SIZE (16)
+#define MAX_SIZE (128)
 #define MIN_SIZE (sizeof(struct tblock_t))
 
 #define CAVG_BIAS .05
