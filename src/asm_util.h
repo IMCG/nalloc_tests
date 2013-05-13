@@ -57,7 +57,7 @@ int64_t xchg64b(int64_t src, int64_t *dest);
  * @param expected_dest The value which we shall compare with *dest.
  * 
  * @return The initial value of *dest
- */
+ */ 
 /* Volatile is here to appease the compiler, not because I think it's a
    magical keyword for "atomic". */
 int64_t cmpxchg64b(int64_t src, volatile int64_t *dest,
