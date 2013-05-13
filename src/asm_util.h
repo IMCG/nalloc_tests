@@ -58,7 +58,11 @@ int64_t xchg64b(int64_t src, int64_t *dest);
  * 
  * @return The initial value of *dest
  */
-int64_t cmpxchg64b(int64_t src, int64_t *dest, int64_t expected_dest);
-__int128_t cmpxchg128b(__int128_t src, __int128_t *dest, __int128_t expected_dest);
+/* Volatile is here to appease the compiler, not because I think it's a
+   magical keyword for "atomic". */
+int64_t cmpxchg64b(int64_t src, volatile int64_t *dest,
+                   int64_t expected_dest);
+__int128_t cmpxchg128b(__int128_t src, volatile __int128_t *dest,
+                       __int128_t expected_dest);
 
 #endif  /* __ASM_UTIL_H__ */

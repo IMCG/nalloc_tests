@@ -179,10 +179,9 @@ void *alloc(size_t size){
         return NULL;
     PINT(slab->nblocks_contig);
     
-    if(slab_num_priv_blocks(slab) + stack_size(&slab->wayward_blocks) == 0){
-        sanchor_t *popped;
-        popped = simpstack_pop(&priv_slabs[cidx]);
-        assert(popped == &slab->sanc);
+    if(slab_num_priv_blocks(slab) == 0){
+        simpstack_pop(&priv_slabs[cidx]);
+        assert(!slab_is_on_priv_stack(slab));
     }
 
     assert(found);

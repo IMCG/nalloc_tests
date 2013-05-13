@@ -35,7 +35,10 @@ typedef union{
 COMPILE_ASSERT(sizeof(tagptr_t) == 16);
 
 typedef struct{
-    tagptr_t top __attribute__((__aligned__ (16)));
+    /* Yep, the volatile is here because GCC optimized out the read from top
+       in the cmpxchg loop. Tune in for next week's edition of Fuck You GCC!
+       */
+    volatile tagptr_t top __attribute__((__aligned__ (16)));
 }lfstack_t;
 
 #define FRESH_STACK                                       \
