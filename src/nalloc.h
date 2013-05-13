@@ -14,7 +14,6 @@
 #include <peb_macros.h>
 #include <peb_util.h>
 #include <pthread.h>
-#include <refcount.h>
 #include <stack.h>
 
 #ifdef HIDE_NALLOC
@@ -97,35 +96,6 @@ void free(void *buf);
 void *calloc(size_t nmemb, size_t size);
 void *realloc(void *ptr, size_t size);
 
-static void *large_alloc(size_t size);
-static void large_dealloc(large_block_t *block);
-
-static int bcacheidx_of(size_t size);
-
-static void *alloc(size_t size);
-
-static int slab_is_hot(slab_t *slab);
-static int slab_is_empty(slab_t *slab);
-static unsigned int slab_compute_nblocks(size_t block_size);
-static block_t *alloc_from_slab(slab_t *slab);
-static block_t *dealloc_from_slab(block_t *b, slab_t *s);
-static slab_t *slab_install_new(size_t size, int sizeidx);
-static void slab_free(slab_t *freed, int cidx);
-
-static void dealloc(block_t *b);
-static void return_wayward_block(block_t *b, slab_t *slab, int cidx);
-
-static slab_t *slab_of(block_t *b);
-
-static void free_slabs_atexit();
-static void jump_through_hoop(void);
-static int dynamic_init(void);
-
-static void profile_bytes(size_t nbytes);
-static void profile_slabs(size_t nslabs);
 nalloc_profile_t *get_profile(void);
-
-static int write_block_magics(block_t *b);
-static int block_magics_valid(block_t *b);
 
 #endif

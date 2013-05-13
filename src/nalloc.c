@@ -25,10 +25,41 @@
 #include <list.h>
 #include <stack.h>
 #include <sys/mman.h>
-#include <refcount.h>
 
 #include <nalloc.h>
 #include <global.h>
+
+static void *large_alloc(size_t size);
+static void large_dealloc(large_block_t *block);
+
+static int bcacheidx_of(size_t size);
+
+static void *alloc(size_t size);
+
+static int slab_is_full(slab_t *s);
+static int slab_num_priv_blocks(slab_t *s);
+static int slab_is_on_priv_stack(slab_t *s);
+static unsigned int slab_max_size(size_t block_size);
+static block_t *alloc_from_slab(slab_t *slab);
+static void dealloc_from_slab(block_t *b, slab_t *s);
+static slab_t *slab_install_new(size_t size, int sizeidx);
+/* static void slab_free(slab_t *freed, int cidx); */
+static void steal_or_dealloc_slab(slab_t *s, int cidx);
+
+static void dealloc(block_t *b);
+static void return_wayward_block(block_t *b, slab_t *slab, int cidx);
+
+static slab_t *slab_of(block_t *b);
+
+static void free_slabs_atexit();
+static void first_time_init(void);
+static int dynamic_init(void);
+
+static void profile_bytes(size_t nbytes);
+static void profile_slabs(size_t nslabs);
+static int write_block_magics(block_t *b, slab_t *s);
+static int block_magics_valid(block_t *b, slab_t *s);
+
 
 /* DANGER: It happens to be the case that an uninitialized lfstack is all
    0. If that's not true, then you need a barrier during first time init
@@ -141,9 +172,9 @@ void *alloc(size_t size){
     if(!found)
         return NULL;
     
-    if(slab_is_empty(slab))
+    if(slab_num_priv_blocks(slab) + stack_size(&slab->wayward_blocks) == 0)
         simpstack_pop(&priv_slabs[cidx]);
-    
+
     assert(found);
     rassert(slab_of(found)->block_size, >=, size);
     assert(aligned(found, MIN_ALIGNMENT));
@@ -151,40 +182,50 @@ void *alloc(size_t size){
 }
 
 static
-int slab_is_on_priv_stack(slab_t *slab){
-    /* Note that this doesn't count wayward blocks. If a slab is filling up
-       with only wayward blocks, it doesn't get put into the cache. If it
-       fills up all the way, it gets freed or stolen. */
-    return slab->priv_blocks.size || slab->nblocks_contig;
+int slab_num_priv_blocks(slab_t *s){
+    return s->priv_blocks.size + s->nblocks_contig;
 }
-
+ 
 static
-int slab_num_priv_blocks(slab_t *slab){
-    return slab->priv_blocks.size + slab->nblocks_ 
+int slab_is_full(slab_t *s){
+    int npriv = slab_num_priv_blocks(s);
+    int max = slab_max_size(s->block_size);
+    assert(npriv + stack_size(&s->wayward_blocks) <= max);
+    return npriv == max
+        || npriv + stack_size(&s->wayward_blocks) == max;
 }
-
-
+ 
 static
-int slab_is_dirty(slab_t *slab){
-    return slab->wayward_blocks.top.ptr != NULL;
+int slab_is_on_priv_stack(slab_t *s){
+    return !slab_num_priv_blocks(s);
 }
 
 static 
-unsigned int slab_compute_nblocks(size_t block_size){
+unsigned int slab_max_size(size_t block_size){
     return (SLAB_SIZE - sizeof(slab_t)) / block_size;
 }
 
 static
-block_t *alloc_from_slab(slab_t *slab){
-    if(slab->nblocks_contig)
-        return &slab->blocks[slab->block_size * --slab->nblocks_contig];
-    block_t *found = simpstack_pop_lookup(block_t, sanc, &slab->priv_blocks);
+block_t *alloc_from_slab(slab_t *s){
+    if(s->nblocks_contig)
+        return &s->blocks[s->block_size * --s->nblocks_contig];
+    block_t *found = simpstack_pop_lookup(block_t, sanc, &s->priv_blocks);
+    int size;
     if(!found)
-        found = lookup_sanchor(stack_pop_all(&slab->wayward_blocks),
+        found = lookup_sanchor(stack_pop_all(&s->wayward_blocks, &size),
                                block_t, sanc);
     if(found)
-        simpstack_replace(found->sanc.next, &slab->priv_blocks);
+        simpstack_replace(found->sanc.next, &s->priv_blocks, size);
+    assert(block_magics_valid(found, s));
     return found;
+}
+
+static
+void dealloc_from_slab(block_t *b, slab_t *s){
+    if(b == &s->blocks[s->nblocks_contig])
+        s->nblocks_contig++;
+    else
+        simpstack_push(&b->sanc, &s->priv_blocks);
 }
 
 static
@@ -212,7 +253,7 @@ slab_t *slab_install_new(size_t size, int sizeidx){
             }
             *found = (slab_t) FRESH_SLAB;
             found->block_size = size;
-            found->nblocks_contig = slab_compute_nblocks(size);
+            found->nblocks_contig = slab_max_size(size);
         }
     }
 
@@ -241,16 +282,16 @@ void dealloc(block_t *b){
     slab_t *s = slab_of(b);
     int cidx = bcacheidx_of(s->block_size);
 
+    assert(write_block_magics(b, s));
+
     if(s->host_tid == pthread_self()){
-        simpstack_push(&b->sanc, &s->priv_blocks);
-        if(slab_is_empty(s)){
-            /* Slab becomes cold again. This has the advantage of making
-               allocations sequential and thus cache and prefetch friendly. */
+        if(!slab_is_on_priv_stack(s))
             simpstack_push(&s->sanc, &priv_slabs[cidx]);
-        }
+        simpstack_push(&b->sanc, &s->priv_blocks);
         
         dealloc_from_slab(b, s);
-        if(slab_is_full(s) && priv_slabs[cidx].size >= IDEAL_NUM_SLABS)
+        if(slab_is_full(s) && priv_slabs[cidx].size >= IDEAL_FULL_SLABS)
+            (void) 1;
             /* try_freeing_head_slab(cidx); */
             /* Consider freeing. */
     }
@@ -259,16 +300,8 @@ void dealloc(block_t *b){
 }
 
 static
-block_t *dealloc_from_slab(block_t *b, slab_t *s){
-    if(b == slab->blocks[s->nblocks_contig])
-        slab->nblocks_contig++;
-    else
-        simpstack_push(&b->sanc, &s->priv_blocks);
-}
-
-static
 void return_wayward_block(block_t *b, slab_t *s, int cidx){
-    if(slab_is_full() && !slab_is_on_priv_stack())
+    if(slab_is_full(s) && !slab_is_on_priv_stack(s))
         steal_or_dealloc_slab(s, cidx);
     else
         stack_push(&b->sanc, &s->wayward_blocks);
@@ -277,13 +310,13 @@ void return_wayward_block(block_t *b, slab_t *s, int cidx){
 
 static
 void steal_or_dealloc_slab(slab_t *s, int cidx){
-    if(priv_slabs[cidx].size < IDEAL_NUM_SLABS){
-        slab->host_tid = pthread_self();
+    if(priv_slabs[cidx].size < IDEAL_FULL_SLABS){
+        s->host_tid = pthread_self();
         simpstack_push(&s->sanc, &priv_slabs[cidx]);
     }
     else{
-        slab->host_tid = INVALID_TID;
-        stack_push(&s->sanc, &cold_stacks);
+        s->host_tid = INVALID_TID;
+        stack_push(&s->sanc, &clean_slabs);
     }
 }
 
@@ -296,9 +329,6 @@ slab_t *slab_of(block_t *b){
 static
 void free_slabs_atexit(){
     /* TODO: Obvious placeholder. */
-    slab_t *cur;
-    FOR_EACH_LLOOKUP(cur, slab_t, lanc, &priv_slabs)
-        cur->wayward_blocks = &cur->disowned_blocks;
 }
 
 static
@@ -308,11 +338,12 @@ void first_time_init(void){
 
 static
 int dynamic_init(void){
-    if(!wayward_bcache){
+    static __thread int init_done = 0;
+    if(!init_done){
         pthread_once(&key_rdy, first_time_init);
         if(pthread_setspecific(destructor_key, (void*) !NULL))
             return -1;
-        destructor_rdy = 1;
+        init_done = 1;
     }
     return 0;
 }
@@ -331,26 +362,27 @@ void profile_slabs(size_t nslabs){
         max(profile.num_slabs += nslabs, profile.num_slabs_highwater);
 }
 
-static
 nalloc_profile_t *get_profile(void){
     return &profile;
 }
 
 static
-int write_block_magics(block_t *b){
+int write_block_magics(block_t *b, slab_t *s){
     if(!HEAP_DBG)
         return 1;
-    for(int i = 0; i < (b->size - sizeof(*b)) / sizeof(*b->magics); i++)
-        b->magics[i] = NALLOC_MAGIC_INT;
+    int *magics = (int *) (b + 1);
+    for(int i = 0; i < (s->block_size - sizeof(*b)) / sizeof(*magics); i++)
+        magics[i] = NALLOC_MAGIC_INT;
     return 1;
 }
 
 static
-int block_magics_valid(block_t *b){
+int block_magics_valid(block_t *b, slab_t *s){
     if(!HEAP_DBG)
         return 1;
-    for(int i = 0; i < (b->size - sizeof(*b)) / sizeof(*b->magics); i++)
-        rassert(b->magics[i], ==, NALLOC_MAGIC_INT);
+    int *magics = (int *) (b + 1);
+    for(int i = 0; i < (s->block_size - sizeof(*b)) / sizeof(*magics); i++)
+        rassert(magics[i], ==, NALLOC_MAGIC_INT);
     return 1;
 }
 

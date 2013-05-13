@@ -20,10 +20,8 @@ typedef struct sanchor_t{
 
 typedef union{
     struct{
-        union{
-            int32_t tag;
-            int32_t size;
-        }
+        int32_t tag;
+        int32_t size;
         sanchor_t *ptr;
     };
     /* This is necessary because casting tagptr_t* to __int128_t* ("type
@@ -40,14 +38,15 @@ typedef struct{
     tagptr_t top __attribute__((__aligned__ (16)));
 }lfstack_t;
 
-#define FRESH_STACK                       \
-    {                                           \
-        .top = {.tag = 0, .ptr = NULL},                       \
+#define FRESH_STACK                                       \
+    {                                                     \
+        .top = {.tag = 0, .ptr = NULL, .size = 0},        \
     }
                                                                         
 void stack_push(sanchor_t *anc, lfstack_t *stack);
+int stack_size(lfstack_t *stack);
 sanchor_t *stack_pop(lfstack_t *stack);
-sanchor_t *stack_pop_all(lfstack_t *stack);
+sanchor_t *stack_pop_all(lfstack_t *stack, int *size);
 
 #define lookup_sanchor(ptr, container_type, field)    \
     container_of(ptr, container_type, field)          
@@ -94,7 +93,7 @@ typedef struct simpstack_t{
 void simpstack_push(sanchor_t *sanc, simpstack_t *stack);
 sanchor_t *simpstack_pop(simpstack_t *stack);
 sanchor_t *simpstack_peek(simpstack_t *stack);
-void simpstack_replace(sanchor_t *new_head, simpstack_t *stack);
+void simpstack_replace(sanchor_t *new_head, simpstack_t *stack, int size);
 
 #define simpstack_pop_lookup(container_type, field, stack)      \
     lookup_sanchor(simpstack_pop(stack), container_type, field) 

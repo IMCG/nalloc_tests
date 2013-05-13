@@ -19,18 +19,27 @@
 void stack_push(sanchor_t *anc, lfstack_t *stack){
     trace(anc, p);
 
-    sanchor_t *top;
+    tagptr_t top;
+    tagptr_t new_top;
     int loops = 0;
     (void) loops;
 
+    rassert(anc->next, ==, NULL);
+    
+    /* ABA is impossible with just pushes, so it's better not to make
+       tagptr collisions more likely by incrementing tag. */
     do{
         /* assert(loops++ <= MAX_FAILURES); */
-        top = stack->top.ptr;
-        anc->next = top;
-    } while(cmpxchg64b((int64_t) anc,
-                       (int64_t *) &stack->top.ptr,
-                       (int64_t) top)
-            != (int64_t) top);
+        top = stack->top;
+        anc->next = top.ptr;
+        new_top.ptr = anc;
+        new_top.tag = top.tag;
+        new_top.size = top.size + 1;
+    } while(stack->top.ptr != top.ptr ||
+            cmpxchg128b(new_top.raw,
+                       &stack->top.raw,
+                       top.raw)
+            != top.raw);
 
     /* xadd(1, &stack->size); */
 }
@@ -53,19 +62,46 @@ sanchor_t *stack_pop(lfstack_t *stack){
         new.tag = old.tag + 1;
         /* Even if out of date, this should always be a readable ptr. */
         new.ptr = old.ptr->next;
+        new.size = old.size - 1;
     } while(stack->top.tag != old.tag ||
             cmpxchg128b(new.raw,
                         &stack->top.raw,
                         old.raw)
             != old.raw);
-                      
+
+    old.ptr->next = NULL;
+    
     return old.ptr;
 }
 
-sanchor_t *stack_pop_all(lfstack_t *stack){
-    if(!stack->top.ptr)
-        return NULL;
-    return (sanchor_t *) xchg64b((int64_t) NULL, (int64_t *) &stack->top.ptr);
+int stack_size(lfstack_t *stack){
+    return stack->top.size;
+}
+
+sanchor_t *stack_pop_all(lfstack_t *stack, int *size){
+    /* This would be simpler with xchg128b, but no such instruction
+       exists. However, it turns out that xchg is worse than cmpxchg because
+       it always assert #LOCK on the bus while cmpxchg is able to use the
+       cache coherency mechanism to avoid that. The exact details are
+       uspecified for good reasons by Intel, but you can kind of imagine what
+       might be going on. See Intel Programmer's Guide section Bus Locking as
+       well as:
+       https://lkml.org/lkml/2010/12/18/59
+    */
+
+    tagptr_t new_top = {0};
+    tagptr_t top;
+    do{
+        if(!stack->top.ptr)
+            return NULL;
+        top = stack->top;
+    } while(cmpxchg128b(new_top.raw,
+                        &stack->top.raw,
+                        top.raw)
+            != top.raw);
+
+    *size = top.size;
+    return top.ptr;
 }
 
 
@@ -85,9 +121,10 @@ sanchor_t *simpstack_pop(simpstack_t *stack){
     return out;
 }
 
-void simpstack_replace(sanchor_t *new_head, simpstack_t *stack){
+void simpstack_replace(sanchor_t *new_head, simpstack_t *stack, int size){
     assert(stack->top == NULL);
     stack->top = new_head;
+    stack->size = size;
 }
 
 
