@@ -54,6 +54,16 @@ struct tblock_t{
     int magics[];
 };
 
+struct child_args{
+    int parent_tid;
+    union {
+        lfstack_t s; 
+        /* uint8_t pad[64]; */
+        uint8_t pad[64];
+    } block_stacks[NUM_STACKS];
+};
+
+
 /* Fun fact: without the volatile, a test-yield loop on rdy will optimize out
    the test part and will just yield in a loop forever. Meanwhile
    if(0){expression;} generates an ASM branch that's never called. Nice job,
@@ -205,18 +215,13 @@ void mt_child_rand(int parent_tid){
 
 void mt_sharing_child();
 
-struct child_args{
-    int parent_tid;
-    lfstack_t block_stacks[NUM_STACKS];
-};
-
 void malloc_test_sharing(){
     trace();
 
     struct child_args shared;
     shared.parent_tid = _gettid();
     for(int i = 0; i < NUM_STACKS; i++)
-        shared.block_stacks[i] = (lfstack_t) FRESH_STACK;
+        shared.block_stacks[i].s = (lfstack_t) FRESH_STACK;
 
     pthread_t kids[num_threads];
     for(int i = 0; i < num_threads; i++)
@@ -245,7 +250,7 @@ void mt_sharing_child(struct child_args *shared){
     int num_blocks = 0;
     for(int i = 0; i < NUM_OPS; i++){
         int size;
-        lfstack_t *blocks= &shared->block_stacks[prand() % NUM_STACKS];
+        lfstack_t *blocks= &shared->block_stacks[prand() % NUM_STACKS].s;
         int malloc_prob =
             num_blocks < num_allocations/2 ? 75 :
             num_blocks < num_allocations ? 50 :
@@ -299,7 +304,7 @@ void producer_test(void){
     struct child_args shared;
     shared.parent_tid = _gettid();
     for(int i = 0; i < NUM_STACKS; i++)
-        shared.block_stacks[i] = (lfstack_t) FRESH_STACK;
+        shared.block_stacks[i].s = (lfstack_t) FRESH_STACK;
 
     pthread_t kids[num_threads];
     for(int i = 0; i < num_threads; i++)
@@ -314,7 +319,7 @@ void producer_test(void){
         assert(!pthread_join(kids[i], (void *[]){NULL}));
 
     for(int i = 0; i < NUM_STACKS; i++){
-        lfstack_t *blocks = &shared.block_stacks[i];
+        lfstack_t *blocks = &shared.block_stacks[i].s;
         struct tblock_t *cur_block;
         FOR_EACH_SPOP_LOOKUP(cur_block, struct tblock_t, sanc, blocks)
             wsfree(cur_block, cur_block->size);
@@ -325,12 +330,12 @@ void produce(struct child_args *shared){
     int tid = _gettid();
     prand_init();
 
-    lfstack_t priv_blocks = (lfstack_t) FRESH_STACK;
+    simpstack_t priv_blocks = (simpstack_t) FRESH_SIMPSTACK;
     struct tblock_t *cur_block;
     int num_blocks = 0;
     for(int i = 0; i < NUM_OPS; i++){
         int size;
-        lfstack_t *blocks= &shared->block_stacks[prand() % NUM_STACKS];
+        lfstack_t *blocks= &shared->block_stacks[prand() % NUM_STACKS].s;
         int malloc_prob =
             num_blocks < num_threads * num_allocations/2 ? 90 :
             num_blocks < num_threads * num_allocations ? 70 :
@@ -356,13 +361,13 @@ void produce(struct child_args *shared){
                 continue;
             log2("Claiming: %p", cur_block);
             write_magics(cur_block, tid);
-            stack_push(&cur_block->sanc, &priv_blocks);
+            simpstack_push(&cur_block->sanc, &priv_blocks);
             num_blocks--;
         }
 
         if(rand_percent(100 - malloc_prob)){
             cur_block =
-                stack_pop_lookup(struct tblock_t, sanc, &priv_blocks);
+                simpstack_pop_lookup(struct tblock_t, sanc, &priv_blocks);
             if(!cur_block)
                 continue;
             log2("Freeing priv: %p", cur_block);
@@ -385,7 +390,7 @@ void consumer_child(struct child_args *shared){
     lfstack_t priv_blocks = FRESH_STACK;
     int num_blocks = 0;
     for(int i = 0; i < NUM_OPS; i++){
-        lfstack_t *blocks= &shared->block_stacks[prand() % NUM_STACKS];
+        lfstack_t *blocks= &shared->block_stacks[prand() % NUM_STACKS].s;
         int free_prob = 
             num_blocks < num_allocations/2 ? 25 :
             num_blocks < num_allocations ? 50 :
