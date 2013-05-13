@@ -57,26 +57,41 @@ typedef struct{
 COMPILE_ASSERT(sizeof(block_t) <= MIN_BLOCK);
 
 typedef struct{
-    lfstack_t blocks[NBSTACKS];
+    int use_slab_instead;
     refcount_t refs;
-} wayward_bcache_t __attribute__((__aligned__(CACHELINE_SIZE)));
+    /* If HAS_ONE_BSTACK, then just the one stack. If HAS_MANY_BSTACKS, then
+       this is actually NBSTACKS. */
+    lfstack_t bstacks[1];
+} wayward_bcache_t;
 
 typedef struct{
-    wayward_bcache_t *wayward_blocks;
+    wayward_bcache_t base;
+    lfstack_t bstacks[NBSTACKS - 1];
+} big_wayward_bcache_t __attribute__((__aligned__(CACHELINE_SIZE)));
+
+typedef struct{
+    wayward_bcache_t disowned_blocks;
+    /* Dear GCC: don't be clever by making repeated reads rather than storing
+       in a register. Not sure if necessary. */
+    wayward_bcache_t *volatile wayward_blocks;
     simpstack_t hot_blocks;
     sanchor_t sanc;
     unsigned int nblocks_contig;
     size_t block_size;
     block_t blocks[];
-} slab_t;
+} slab_t __attribute__((__aligned__(MIN_ALIGNMENT)));
 
-#define FRESH_SLAB {                            \
-        .wayward_blocks = NULL,                 \
-            .hot_blocks = FRESH_STACK,          \
-            .sanc = FRESH_SANCHOR,              \
-            .nblocks_contig = 0,                \
-            .block_size = 0,                    \
-            }
+/* Note that the refcnt here is a dummy val. It should never reach zero. */
+/* Ignore emacs' crazy indentation. There's no simple way to fix it. */
+#define FRESH_SLAB {                                            \
+        .disowned_blocks = { .type = HAS_ONE_BSTACK,            \
+                             .refs = FRESH_REFCOUNT(15418)},    \
+            .wayward_blocks = NULL,                             \
+                 .hot_blocks = FRESH_SIMPSTACK,                 \
+                 .sanc = FRESH_SANCHOR,                         \
+                 .nblocks_contig = 0,                           \
+                 .block_size = 0,                               \
+                 }
 
 COMPILE_ASSERT(sizeof(large_block_t) != sizeof(slab_t));
 COMPILE_ASSERT(aligned_pow2(sizeof(slab_t), MIN_ALIGNMENT));
@@ -106,15 +121,16 @@ void *realloc(void *ptr, size_t size);
 static void *large_alloc(size_t size);
 static void large_dealloc(large_block_t *block);
 
-static int round_and_get_bcacheidx(size_t *size);
+static int bcacheidx_of(size_t size);
 
 static void *alloc(size_t size);
 
 static int slab_is_hot(slab_t *slab);
 static int slab_is_empty(slab_t *slab);
+static unsigned int slab_compute_nblocks(size_t block_size);
 static void *alloc_from_slab(slab_t *slab);
 static slab_t *slab_install_new(size_t size, int sizeidx);
-static void slab_free(slab_t *freed);
+static void slab_free(slab_t *freed, int cidx);
 
 static block_t *alloc_from_wayward_blocks(int cidx);
 

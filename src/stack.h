@@ -39,7 +39,7 @@ typedef struct{
 
 #define FRESH_STACK                       \
     {                                           \
-        .top = {0, NULL},                       \
+        .top = {.tag = 0, .ptr = NULL},                       \
     }
                                                                         
 void stack_push(sanchor_t *anc, lfstack_t *stack);

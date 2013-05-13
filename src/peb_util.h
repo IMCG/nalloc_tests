@@ -27,6 +27,7 @@
     })                                                                  \
 
 #include <time.h>
+#include <sys/resource.h>
 #define RUSG_GETTIME(expr)                                              \
     ({                                                                  \
        struct rusage r;                                                 \
@@ -36,7 +37,7 @@
        getrusage(RUSAGE_SELF, &r);                                      \
        struct timeval __tend = r.ru_utime;                              \
        1000 * (__tend.tv_sec - __tstart.tv_sec) +                       \
-           (double) (__tend.tv_nsec - __tstart.tv_nsec) / 1000000.0;    \
+           (double) (__tend.tv_usec - __tstart.tv_usec) / 1000.0;    \
     })                                                                  \
 
 #include <sys/time.h>
@@ -52,7 +53,7 @@
        })
 
 
-#define GETTIME(expr) TOD_GETTIME(expr)
+#define GETTIME(expr) CLOCK_GETTIME(expr)
 #define TIME(expr)                                                      \
     do{                                                                 \
         log(#expr ": %f ms", GETTIME((expr)));                          \
