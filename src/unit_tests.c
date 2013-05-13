@@ -34,7 +34,7 @@ static int print_profile = 0;
 
 #define NUM_OPS ((ops_mult * num_allocations) / num_threads)
 
-#define NUM_STACKS 16
+#define NUM_STACKS 32
 #define NUM_LISTS 16
 
 #define MAX_SIZE (128)

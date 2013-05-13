@@ -46,7 +46,8 @@
 #define MAX_BLOCK (SLAB_SIZE / 8)
 
 static const int bcache_size_lookup[] = {
-    16, 32, 48, 64, 80, 96, 112, 256, 512, 
+    16, 32, 48, 64, 80, 96, 112, 128,
+    256, 512, 
 };
 #define NBSTACKS ARR_LEN(bcache_size_lookup)
 

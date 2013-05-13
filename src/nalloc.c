@@ -148,9 +148,17 @@ void large_dealloc(large_block_t *block){
 
 static
 int bcacheidx_of(size_t size){
-    for(int i = 0; i < NBSTACKS; i++)
-        if(size <= bcache_size_lookup[i])
-            return i;
+    assert(size);
+    /* Yes, this should be turned into a non-brittle thing. Whatever. It's 5AM. */
+    if(size <= 128)
+        return (size - 1) >> 4;
+    if(size <= 256)
+        return 8;
+    return 9;
+        
+    /* for(int i = 0; i < NBSTACKS; i++) */
+    /*     if(size <= bcache_size_lookup[i]) */
+    /*         return i; */
     LOGIC_ERROR("Little allocator vs big request: %lu.", size);
 }
 
