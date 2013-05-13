@@ -39,7 +39,7 @@ static void *alloc(size_t size);
 static int slab_is_full(slab_t *s);
 static int slab_num_priv_blocks(slab_t *s);
 static int slab_is_on_priv_stack(slab_t *s);
-static unsigned int slab_max_size(size_t block_size);
+static unsigned int slab_max_size(slab_t *s);
 static block_t *alloc_from_slab(slab_t *slab);
 static void dealloc_from_slab(block_t *b, slab_t *s);
 static slab_t *slab_install_new(size_t size, int sizeidx);
@@ -80,17 +80,22 @@ static pthread_once_t key_rdy = PTHREAD_ONCE_INIT;
 static pthread_key_t destructor_key = 0;
 
 void *malloc(size_t size){
-    trace2(size, lu);
+    trace(size, lu);
+    void *out;
+    if(size == 0)
+        return NULL;
     if(size > MAX_BLOCK){
         large_block_t *large_found = large_alloc(size);
         /* profile_bytes(large_found->size); */
-        return large_found ? large_found + 1 : NULL;
-    }
-    return alloc(size);
+        out = large_found ? large_found + 1 : NULL;
+    } else
+        out = alloc(size);
+    PPNT(out);
+    return out;
 }
 
 void free(void *buf){
-    trace2(buf, p);
+    trace(buf, p);
     if(!buf)
         return;
     /* TODO: Assumes no one generates pointers near page boundaries. Fine now,
@@ -143,7 +148,7 @@ void large_dealloc(large_block_t *block){
 
 static
 int bcacheidx_of(size_t size){
-    for(int i = 0; i < size; i++)
+    for(int i = 0; i < NBSTACKS; i++)
         if(size <= bcache_size_lookup[i])
             return i;
     LOGIC_ERROR("Little allocator vs big request: %lu.", size);
@@ -167,13 +172,18 @@ void *alloc(size_t size){
         if(!slab)
             return NULL;
     }
-    
+
+    PINT(slab->nblocks_contig);
     found = alloc_from_slab(slab);
     if(!found)
         return NULL;
+    PINT(slab->nblocks_contig);
     
-    if(slab_num_priv_blocks(slab) + stack_size(&slab->wayward_blocks) == 0)
-        simpstack_pop(&priv_slabs[cidx]);
+    if(slab_num_priv_blocks(slab) + stack_size(&slab->wayward_blocks) == 0){
+        sanchor_t *popped;
+        popped = simpstack_pop(&priv_slabs[cidx]);
+        assert(popped == &slab->sanc);
+    }
 
     assert(found);
     rassert(slab_of(found)->block_size, >=, size);
@@ -189,7 +199,7 @@ int slab_num_priv_blocks(slab_t *s){
 static
 int slab_is_full(slab_t *s){
     int npriv = slab_num_priv_blocks(s);
-    int max = slab_max_size(s->block_size);
+    int max = slab_max_size(s);
     assert(npriv + stack_size(&s->wayward_blocks) <= max);
     return npriv == max
         || npriv + stack_size(&s->wayward_blocks) == max;
@@ -197,44 +207,53 @@ int slab_is_full(slab_t *s){
  
 static
 int slab_is_on_priv_stack(slab_t *s){
-    return !slab_num_priv_blocks(s);
+    return slab_num_priv_blocks(s) != 0;
 }
 
 static 
-unsigned int slab_max_size(size_t block_size){
-    return (SLAB_SIZE - sizeof(slab_t)) / block_size;
+unsigned int slab_max_size(slab_t *s){
+    return (SLAB_SIZE - sizeof(slab_t)) / s->block_size;
 }
 
 static
 block_t *alloc_from_slab(slab_t *s){
+    trace3(s, p);
+    
     if(s->nblocks_contig)
-        return &s->blocks[s->block_size * --s->nblocks_contig];
+        return (block_t *) &s->blocks[s->block_size * --s->nblocks_contig];
     block_t *found = simpstack_pop_lookup(block_t, sanc, &s->priv_blocks);
-    int size;
-    if(!found)
+    if(!found){
+        int size;
         found = lookup_sanchor(stack_pop_all(&s->wayward_blocks, &size),
                                block_t, sanc);
-    if(found)
-        simpstack_replace(found->sanc.next, &s->priv_blocks, size);
+        if(found)
+            simpstack_replace(found->sanc.next, &s->priv_blocks, size);
+    }
     assert(block_magics_valid(found, s));
     return found;
 }
 
 static
 void dealloc_from_slab(block_t *b, slab_t *s){
-    if(b == &s->blocks[s->nblocks_contig])
+    trace3(b, p, s, p);
+    
+    if(b == (block_t *) &s->blocks[s->nblocks_contig * s->block_size])
         s->nblocks_contig++;
     else
         simpstack_push(&b->sanc, &s->priv_blocks);
 }
 
 static
-slab_t *slab_install_new(size_t size, int sizeidx){
-    trace2(size, lu, sizeidx, d);
+slab_t *slab_install_new(size_t size, int cidx){
+    trace3(size, lu, cidx, d);
     
     slab_t *found = stack_pop_lookup(slab_t, sanc, &clean_slabs);
-    if(!found){
-        found = stack_pop_lookup(slab_t, sanc, &dirty_slabs[sizeidx]);
+    if(found){
+        log("clean");
+        found->block_size = size;
+        found->nblocks_contig = slab_max_size(found);
+    } else {
+        found = stack_pop_lookup(slab_t, sanc, &dirty_slabs[cidx]);
         if(!found){
             /* Note the use of MAP_POPULATE to escape page faults that *will*
                otherwise happen due to overcommit. */
@@ -253,16 +272,26 @@ slab_t *slab_install_new(size_t size, int sizeidx){
             }
             *found = (slab_t) FRESH_SLAB;
             found->block_size = size;
-            found->nblocks_contig = slab_max_size(size);
+            found->nblocks_contig = slab_max_size(found);
+
+            log("new clean");
         }
     }
+
 
     assert(found->host_tid == INVALID_TID);
     assert(found->block_size == size);
 
     found->host_tid = pthread_self();
+    simpstack_push(&found->sanc, &priv_slabs[cidx]);
 
+    PPNT(found);
+    PLUNT(found->block_size);
+    
     profile_slabs(1);
+
+    assert(aligned(found, SLAB_SIZE));
+    
     return found;
 }
 
@@ -282,12 +311,12 @@ void dealloc(block_t *b){
     slab_t *s = slab_of(b);
     int cidx = bcacheidx_of(s->block_size);
 
+    *b = (block_t) FRESH_BLOCK;
     assert(write_block_magics(b, s));
 
     if(s->host_tid == pthread_self()){
         if(!slab_is_on_priv_stack(s))
             simpstack_push(&s->sanc, &priv_slabs[cidx]);
-        simpstack_push(&b->sanc, &s->priv_blocks);
         
         dealloc_from_slab(b, s);
         if(slab_is_full(s) && priv_slabs[cidx].size >= IDEAL_FULL_SLABS)

@@ -34,7 +34,7 @@
 
 #define PAGE_SHIFT 12
 #define PAGE_SIZE (1 << PAGE_SHIFT)
-#define SLAB_SIZE (PAGE_SIZE >> 1)
+#define SLAB_SIZE (PAGE_SIZE)
 
 #define MIN_ALIGNMENT 16
 
@@ -42,10 +42,11 @@
 #define IDEAL_FULL_SLABS 5
 
 #define MIN_BLOCK 16
+/* TODO: this is 512, aka way too small. Need bigger slabs. */
 #define MAX_BLOCK (SLAB_SIZE / 8)
 
 static const int bcache_size_lookup[] = {
-    16, 24, 32, 48, 64, 80, 96, 112, 256, 512, 
+    16, 32, 48, 64, 80, 96, 112, 256, 512, 
 };
 #define NBSTACKS ARR_LEN(bcache_size_lookup)
 
@@ -54,20 +55,20 @@ typedef struct{
 } large_block_t;
 
 typedef struct{
-    __attribute__((__aligned__(MIN_ALIGNMENT)))
     sanchor_t sanc;
 } block_t;
 COMPILE_ASSERT(sizeof(block_t) <= MIN_BLOCK);
 
+#define FRESH_BLOCK {.sanc = FRESH_SANCHOR }
+
 typedef struct{
     lfstack_t wayward_blocks;
-    unsigned int num_wayward_blocks;
     simpstack_t priv_blocks;
     pthread_t host_tid;
     sanchor_t sanc;
     unsigned int nblocks_contig;
     size_t block_size;
-    block_t blocks[];
+    uint8_t blocks[];
 } slab_t __attribute__((__aligned__(MIN_ALIGNMENT)));
 
 /* Note that the refcnt here is a dummy val. It should never reach zero. */

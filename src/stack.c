@@ -25,6 +25,7 @@ void stack_push(sanchor_t *anc, lfstack_t *stack){
     (void) loops;
 
     rassert(anc->next, ==, NULL);
+    rassert(stack->top.ptr, !=, anc);
     
     /* ABA is impossible with just pushes, so it's better not to make
        tagptr collisions more likely by incrementing tag. */
@@ -106,7 +107,11 @@ sanchor_t *stack_pop_all(lfstack_t *stack, int *size){
 
 
 void simpstack_push(sanchor_t *sanc, simpstack_t *stack){
+    trace(sanc, p, stack, p);
+    
     assert(!sanc->next);
+    assert(sanc != stack->top);
+    
     sanc->next = stack->top;
     stack->top = sanc;
     stack->size++;
@@ -118,10 +123,15 @@ sanchor_t *simpstack_pop(simpstack_t *stack){
     stack->top = out->next;
     out->next = NULL;
     stack->size--;
+
+    trace(stack, p, out, p);
+    
     return out;
 }
 
 void simpstack_replace(sanchor_t *new_head, simpstack_t *stack, int size){
+    trace(new_head, p, stack, p, size, d);
+    
     assert(stack->top == NULL);
     stack->top = new_head;
     stack->size = size;

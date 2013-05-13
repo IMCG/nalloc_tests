@@ -2,8 +2,6 @@
  * @file   unit_tests.c
  * @author Alex Podolsky <apodolsk@andrew.cmu.edu>
  * 
- * @brief  Tests to be run by the kernel itself, right before loading init.
- *
  * A lot of knick-knacks.
  */
 
@@ -39,7 +37,7 @@ static int print_profile = 0;
 #define NUM_STACKS 16
 #define NUM_LISTS 16
 
-#define MAX_SIZE (1024)
+#define MAX_SIZE (16)
 #define MIN_SIZE (sizeof(struct tblock_t))
 
 #define CAVG_BIAS .05

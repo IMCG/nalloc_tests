@@ -1,6 +1,6 @@
 # Note: This is all BS. I don't actually know make.
 CC=gcc
-CFLAGS=-Wall -fplan9-extensions -D_GNU_SOURCE -std=gnu99 -O3 -g -Isrc -Wno-missing-braces -Wno-int-to-pointer-cast -pthread -fno-omit-frame-pointer
+CFLAGS=-O0 -Wall -fplan9-extensions -D_GNU_SOURCE -std=gnu99 -g -Isrc -Wno-missing-braces -Wno-int-to-pointer-cast -pthread -fno-omit-frame-pointer
 LDFLAGS= -L/afs/cs/academic/class/15418-s13/public/lib -Xlinker -rpath -Xlinker /afs/cs/academic/class/15418-s13/public/lib -lprofiler -pthread -lrt
 SRCDIR=src
 OBJDIR=obj
