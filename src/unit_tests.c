@@ -57,9 +57,8 @@ struct tblock_t{
 struct child_args{
     int parent_tid;
     union {
-        lfstack_t s; 
-        /* uint8_t pad[64]; */
-        uint8_t pad[64];
+         __attribute__ ((__aligned__(64)))
+        lfstack_t s;
     } block_stacks[NUM_STACKS];
 };
 
