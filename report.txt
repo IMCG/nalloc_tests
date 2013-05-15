@@ -1,0 +1,435 @@
+Na Lock:
+
+Summary:
+
+I've written two 100% lockfree memory allocators: __nalloc and nalloc. I've
+benchmarked them along with the current state of the art on my own set of
+synthetic tests.
+
+The first allocator had poor scaling on par with libc, but I learned enough
+from it to write a second lockfree allocator that scales approximately
+linearly up to 30 cores. It scales significantly better than libc/ptmalloc and
+slightly better than tcmalloc up to 64 cores.
+
+Background:
+
+Memory allocators are important because most programs use them and many use
+them heavily. A bad allocator can be a central point of contention in billions
+of good programs while a good allocator can be a drop-in replacement that
+twists the memory accesses of bad, ignorant programs into a hardware-friendly
+pattern.
+
+All scalable memory allocators that I know of, including existing lockfree
+allocators, attempt to turn allocation into a data-parallel problem by
+splitting the address space into CPU- or thread-local subheaps. In the best
+case, this has the additional benfit of improving locality, reducing false
+sharing, and empowering the prefetcher, as each thread touches contiguous sets
+of thread-private cache lines.
+
+In the worst case, the program being serviced isn't as parallel as the
+allocator's addresses and careful design is needed to reduce artifactual and
+explicit communication resulting from memory block migrations between
+threads. Moreover, options available to achieve this can be at odds with the
+need to reduce fragmentation and memory blowup.
+
+There's no need to describe sequential algorithms here.
+
+Analysis and Challenges:
+
+As a complicated system which is also a huge data structure with tendrils all
+over the address space, and one which I decided must be entirely lockfree, my
+memory allocator was tricky. I felt insecure about how/whether the project fit
+with the course, so I did try to come up with some less obvious ideas about
+the problem. I mentioned them in the the presentation, so you can skip this.
+
+That "variable data-parallelism" that I mentioned was a new source of
+difficulty. Allocation stands in contrast to all of the problems that we've
+seen in class because they could be analyzed for parallelism before doing the
+work. In the renderer, for instance, you could phrase the problem in a way
+that allowed the data to be handled without communication, and thus strike a
+programmed balance between work and span.
+
+On the other hand, a parallel allocator is fed a predistributed, opaque
+workload with unknown dependencies that require an unknown amount of
+communication to resolve. As such, it needs to be able to scale to different
+levels of parallelism.
+
+In practice, this meant that I had to spend a lot of time thinking "does this
+choice make sense if the workload forces threads to communicate a lot? Does it
+make sense if not?". This was pretty demanding, as each choice affected the
+viability of others in turn. (I didn't actually achieve anything special in
+this direction, but the state of the art allocators were about as bad in the
+worst case.)
+
+I was pretty excited to see that some design issues were familiar from the web
+server. Like a server, an allocator needs to meet latency and throughput goals
+on a bursty workload by making tradeoffs against resource usage goals like
+fragmentation and blowup targets. "Recruiting more nodes, or more than you
+need" has similar costs and benefits to "fetching more pages from the global
+heap, or more often than you need", and "bootup cost" is absolutely an issue
+that came up.
+
+I mention the less abstract performance obstacles that I ran into below.
+
+__nalloc:
+
+Approach:
+
+__nalloc is "naive" because it's almost the same basic design that I would
+have used at the start of the semester. I assumed that the bottlneck would be
+synchronization, so I planned to stick a fast single-threaded algorithm into
+an efficient lockfree wrapper. The mysterious, as-yet-unnamed problem that I
+eventually ran into would have been obvious from the start, had I preferred
+analysis to "doing what sounds elegant" or profiled existing allocators.
+
+The main idea is as follows:
+    - Run a standard single-threaded allocator ("segregated lists with
+    boundary tags and eager splitting and coalescing") on each thread-local
+    subheap.
+    - Use a lockfree stack of pages to distribute memory from the global heap.
+    - Use another lockfree stack attached to each thread to return
+    migratory/"wayward" blocks back to their original thread.
+
+A more detailed algorithm is below. You can skip it, especially if the
+parenthetical description above made sense. However, the part about "wayward
+blocks" at the very end is interesting:
+
+    - Each thread keeps doubly linked "free lists" of free blocks of memory of
+      various size classes.
+
+    - Each block lives in an "arena", a page-sized chunk of memory whose
+    address is "naturally aligned" to its size. Threads fill their free lists
+    by fetching more arenas from a global lockfree stack of pages.
+        - When the page stack is empty, a thread seeking an arena calls mmap()
+          to allocate a batch of pages from the OS.
+        - Each fresh arena holds a single block of maximal size.
+
+    - In malloc(), a thread pops a block from the free list matching the
+      request size.
+        - It shaves off extra space into a new block.
+        - If the list is empty, it tries the next largest one until it runs
+          out and has to fetch a new arena.
+
+    - In free(), a thread merges the freed block with its neighbors if possible.
+        - In order to do this, each block B needs a 4B header which stores an
+          "is_free" flag, the size of B, and the size of the "left of" B in
+          memory.
+        - All merged neighbors are removed from their free lists.
+
+    - If thread F frees a block B that was allocated by thread M, then F
+    inserts B into a lockfree stack of "wayward blocks" associated with M.
+        - When M runs out of blocks, it will pop the entire stack in a single
+          cmpxchg operation, and then add each block to its free lists.
+        - How does F find that list? Each arena keeps a pointer to the stack of
+          wayward blocks of the thread which owns it. Because arenas are
+          naturally aligned, F can compute the address of B's host arena from
+          B's address.
+        - Each arena also has an internal stack for "disowned blocks". If a
+          thread exits and must free an arena before all its blocks are free,
+          then it modifies that arena's "wayward blocks" pointer to point to the
+          stack of disowned blocks.
+
+Benchmarking:
+
+I wrote three benchmarks and analyzed them in perf, gperftools, and
+vtune. Time durations are in global time taken using gettimeofday(). More
+details about benchmarks at the end.
+
+In the first benchmark, each thread randomly allocates, writes, and frees into
+a private pool of memory.
+
+In the second, threads allocate into a global pool implemented as a set of
+lockfree stacks.
+
+In the third, a single thread allocates into a global pool, and all other
+threads free from the pool.
+
+Numbers are taken from my git log. They were generated with the first
+benchmark.
+
+Optimizations and comments, in chronological order:
+
+I needed to align addresses up and down often. Surprisingly, my align_up() and
+align_down(), just an addition or subtraction and a modulo, took a combined 9%
+of runtime. I replaced those with bitops for powers-of-2 and the cost went
+away entirely. It didn't improve scaling, but I was amazed to find that div
+was so intense, in an arithmetic sort of way.
+
+My original design used doubly linked lists of *arenas* rather than blocks. I
+thought it would help fragmentation, locality, and prefetching to exhaust
+arenas in order. Instead, threads wound up doing O(n) search over thousands of
+not-quite-full-enough arenas in order to find one with enough free contiguous
+space for big requests. Tricks like rotating arenas didn't help.
+
+Arena initialization was taking 15% of runtime. In the relevant ASM function,
+the most expensive instruction was the first mov into memory. This could have
+been nasty, but I happened to know that Linux overcommits memory. That is,
+mmap() will reserve virtual addresses, but it assumes you don't really need
+the memory and it won't fetch physical frames until you actually touch it. I
+guessed that arena_init was pagefaulting in order to finalize those new VM
+mappings, and some man told me about an mmap flag to disable overcommit.
+
+This plugged the page faults, but the rest of the work had just moved into
+mmap(). I implemented a combination of batching and prefetching (each
+allocation of an arena allocates N others too), and mmap() has been at <1%
+ever since. It wasn't obvious that this would work, but it seemed likely that
+the expensive part was a VM segment tree lookup, and the kernel could do just
+1 of those per request - and the overhead of locking in the kernel and making
+a syscall was obviously mitigated.
+
+On that note: you could argue that, by using mmap(NULL, MAP_ANON,...),
+__nalloc just moves the hard general-purpose allocation problem into the
+kernel. But somone will have to call mmap() no matter what, and you can't
+disable overcommit if you plan to preemptively mmap() some huge chunk of
+memory in order to manage it yourself. As long as the cost of mmap doesn't
+dominate, it's clearly the right thing to do. That's probably why many of the
+lockfree allocator papers I've read admitted to this trick too. It's fun to
+wonder whether the kernel can do its allocations without locks. I tried very
+briefly and failed in 410, and Linux has locks. But Henry Massalin pulled it
+off in Synthesis.
+
+A less right thing is that I never return memory to the system. This would
+make the pop from the page stack vulnerable to use-after-free. It would be
+exactly the bug that I mentioned in my comment on the lockfree stack
+slides. This is ironic because that comment also claimed that my project was
+motivated by this issue. I bet you didn't know that I had such a lame solution
+in mind. But If I were to solve it, here's my hypothetical solution: keep a
+refcount on the stack and only free if the refcount is zero after popping. A
+page allocator can do this without extra LOCKed instructions by stealing the
+lower bits of the stack->top pointer. Hope you have < 4096 threads allocating.
+
+After writing an email to Kayvon professing "correctness", I realized that I
+had a very bad race condition:
+    - A thread exits and modifies an arena's wayward block stack pointer to
+    point to that arena's disowned_blocks stacks.
+    - Meanwhile, another thread had read that old pointer and has commited
+    itself to inserting onto the newly-dead thread's wayward blocks stack.
+    - Segfault or corruption.
+
+nalloc's design would be vulnerable to this too. The solution that I found
+there (described further on) doesn't work here. You could refcount the number
+of allocated blocks which could possibly wind up on a thread's wayward block
+stack. Is there a more clever (lockfree) way than having a locked instruction
+on the common path in order to satisfy a rare edge case?
+
+After this, and a really long interlude of fixing bugs, here's how my
+performance looked on the theoretically perfectly parallel, no-migrations
+workload on a 64 core machine:
+
+And here's gperftools' sample-based profile of performance with 6 cores on
+GHC*:
+
+*(I didn't get libunwind/gperftools set up on the ALADDIN machine)
+
+Here's what the hardware counters report, according to Linux perf:
+
+Compare that to jemalloc:
+
+I was memory bound like SAXPY. __nalloc() makes 5x as many cache references as
+jemalloc while incurring a miss on 20x as many. That's not surprising,
+considering that for every free(), merge_adjacent touches up to 3 block
+headers and inserts into the global free list. For every malloc(), shave
+touches up to 3 block headers and pops from the free list too. On the other
+hand, jemalloc's profile shows that it's spending time just reading from a
+bitfield.
+
+The biggest drama was that only 9% of of L1 data cache loads missed while 50%
+missed in the LLC. So I __nalloc has enough locality to fit in the working set
+for a while, but then it does something completely unexpected. (There should
+be be no conflict misses in this 100% parallel benchmark - nalloc()'s low LLC
+miss rate on the same test suggests that's the case). My guess is that this is
+the effect of a global linked list of blocks: as the uptime and number of
+allocations increases, it's more and more likely that adjacent blocks on the
+list are from alien arenas past the final frontier of LLC. The effect isnt
+present in the single threaded case, and it increases with the number of
+threads. I attribute this to cache sharing - data from Linux's sysfs on the
+target machine reports that LL/L3 caches are in fact being shared while L1/L2
+aren't.
+
+But, given coalescing, I saw no good alternative to a global list. I
+considered partially disabling merging, keeping a single "current arena"
+pointer to check against in O(1), or trying to improve the ordering of blocks
+on the list. But the 418 assignments have suggested that adding complexity
+doesn't seem to pay off compared to changing the simple things.
+
+Alex's report mentioned that he found no modern coalescing allocator. My own
+research into jemalloc, tcmalloc, and a few lockfree mallocs also failed to
+turn one up. I thought that I had probably found out why everyone avoids such
+coalescing (which is otherwise optimal). They must have judged it to be naive,
+given the hardware.
+
+Approach #2:
+
+I designed nalloc to address my memory problem.
+
+The idea is to use the same lockfree wrapper, but to replace coalescing inside
+arenas with "slab" allocation. Each page/"slab" only provides blocks of a
+single size. The benefit is that you don't need to store headers, nor examine
+adjacent blocks in order to allocate or free; and you don't need a doubly
+linked list of blocks because you never need to "remove from the middle". The
+common case allocation is two loads and a store to pop a non-lockfree
+stack. The drawback is that you can waste space.
+
+Algorithm:
+    - Each thread keeps a private non-lockfree stack of *slabs* for each size
+      class.
+    - Naturally-aligned page sized slabs come from a global LF stack of pages.
+    - Each slab contains a thread-private non-lockfree stack of blocks of
+      identical sizes.
+    - malloc() peeks at the head slab and pops from that slab's stack of
+      blocks.
+        - If the slab is empty, then it gets popped and not put into any data
+        structure. The *only* references to it are the allocated blocks which
+        it holds.
+    - free() exploits natural alignment to derive a block's slab and push the
+      block onto the slab's block stack.
+        - If the slab's block stack is empty, then the slab is added back onto
+          the stack of slabs corresponding to its size.
+    - Each slab contains an LF stack of wayward blocks. 
+        - If malloc() exhausts a slab, it'll pop that slab's wayward blocks
+          onto that slab's block stack.
+        - free() will push onto the stack of wayward blocks if it detects that
+          another thread owns the slab. If it has freed the last block in the
+          slab and all of the blocks in the slab are wayward blocks, then it'll
+          free the slab or steal it for that thread.
+
+This is O(1)* where nalloc was O(N). It's less code than __nalloc. *(excluding
+cmpxchg loops in the stack)
+
+The biggest challenge was dealing with wayward blocks in a way that
+efficiently avoided the race in __nalloc or some other race in its place. I
+knew that I preferred a stacks-of-slabs architecture, but it happened to also
+be the only combination that actually had a neat solution to the problem. I'm
+having a hard time remembering the complete thought process, but consider some
+of the options, where thread M is the owner of slab S and thread F is freeing
+a wayward block onto S:
+    - Suppose F just quietly pushes onto wayward_blocks (the stack) in this
+    scheme. The issue is that M is treating free() as a signal that S is
+    nonempty. If every thread quietly pushes onto wayward_blocks until S's
+    wayward_blocks is full, then no signal can ever be received and S is
+    leaked.
+    - Suppose F ties to actively signal somehow, or to just move S back onto
+    M's slab stacks (make them lockfree). M might exit, so this is exactly the
+    problem that __nalloc faced.
+        - You could store the slab stacks on a management block that lives
+        longer than M and refcount the number of blocks which have slabs with
+        references to it. I implemented most of this - unlike in coalescing,
+        you can avoid updating the refcount upon every malloc and free by
+        exploiting the fact that you can compute the number of allocated
+        blocks in a slab. But it was complicated and hard to justify in favor
+        of simply using a mutex.
+    - M could "search for signals" rather than waiting. You'd pay for O(N)
+    search.
+
+This is O(1) if you don't count cmpxchg loops inside the stack.
+
+The key observation is that M doesn't really need to keep track of empty
+slabs. So in my solution, M purposefully loses its reference to the slab in
+order to prevent racing with F. If F's insertion would fill the slab with only
+wayward blocks, then neither M nor any other thread could hold a reference to
+S; and F can safely do what it wants with the slab. Otherwise, F can't notify
+M but there's still a chance that M might "receive" the "slab non-empty
+signal" by freeing a block on S.
+
+I was especially happy with this because stealing is something that I had
+wanted to support from the start. Suppose you have a producer-consumer setup
+where the consumer needs memory too. Does it really make sense to return all
+memory to the producer if the consumer has loaded it into cache? And even if
+stealing isn't right for a workload, it's better if the last thread to load a
+slab into cache is the one freeing it.
+
+The cost of this scheme is that either: 
+    - You need to set aside 64B per slab in order to protect the non-lockfree
+    block stack from conflict misses due to writes to wayward_blocks.
+    - Or you absorb the conflict misses. I happen to do this now, for
+    "historical reasons".
+
+I was asking about the specifics of LOCK because I wanted to know what kind of
+communication a per-slab wayward_blocks would imply. In theory, it's
+point-to-point (compare that to __nalloc, where every thread freeing wayward
+blocks onto M's arenas writes to a single cache line), but it depends on
+implementation details.
+
+In order to avoid races when attempting to figure out whether a slab is empty
+or whether it consists of only wayward blocks, I needed to store a size
+directly in my lockfree stack. I stole 32 bits from the tag field to do this.
+
+A stack of slabs works where a list of arenas didn't work in __nalloc because
+each slab can guarantee the ability to satisfy an allocation of a certain
+size. It has the theoretical benefits I mentioned before: locality in the
+allocator and also in the program that uses the memory, sequential access in
+the allocator (see below), and lower fragmentation (the other slabs get a
+better chance to fill up and be freed).
+
+Unlike the similar O(N) wayward stack clearing in __nalloc, this
+stack_popall() exchange when popping wayward blocks is O(1). The key is that
+you know that a slab's block stack is empty, so you can simply move the top
+node of the wayward_blocks stack onto it without breaking links.
+
+Intel's x86 optimization guide (just to prove I looked at it it) says that the
+prefetcher will in fact detect sequential accesses. So slabs also keep track
+of the size of the section of contiguous blocks starting at the base of the
+slab. They'll prefer to allocate and deallocate from this section rather than
+from the stack (actually, they should prefer to allocate from the stack - I
+implemented that backwards). This has the additional effect of making slab
+initialization O(1) because the stack traversal fields don't need to be
+written to each block immediately upon slab initialization.
+
+A future improvement might be to keep two stacks - one in any old order, and
+other to be built in strictly decreasing order until it meets the contiguous
+section and is appended. That carries little cost if &second_stack->top is on
+the same cache line. (This sounds like a special case of a more general online
+sorting algorithm.)
+
+This algorithm is less defensible for non-tiny allocations. You can't really
+have a stack of slabs for every 16B between 0B and (FOO * 4096)B, but you also
+don't want to satisfy 513B requests with 1024B blocks. Additionally, big
+blocks incur big overhead due to the header, so you want bigger slabs in that
+case - but bigger slabs waste more memory if they're not fully utilized.
+
+With some modifications, I think it might be reasonable to use the
+space-efficient __nalloc in order to satisfy large allocations. It can never
+be as fast, but a reasonable program probably wouldn't be making large
+allocations fast enough to saturate the allocator because it would be limited
+by the time it takes to fill up those allocations with actual data (assuming
+programs don't often preallocate space for a lot of huge things at once).
+
+The only optimization I made after finishing the design was replacing a size
+class lookup table with arithmetic to compute the size of an allocation. That
+shaved 5% off of runtime. In retrospect, this might have been because of false
+sharing with a global LF stack - I marked the stacks with __aligned__(64)
+because I was worried about that, but I didn't mark the table.
+
+Results:
+
+Results were generated with the benchmarks mentioned above.
+
+Lessons:
+    - You can't just fun a fast single-threaded algorithm in parallel and
+      focus on orchestration (and decomposition, for other problems). Even
+      serial code has to come under scrutiny because it might have hidden
+      communication or synchronization. There is a negative number of free
+      lunches.
+    - Learn your workload. Profile existing solutions or you'll waste your time.
+    - Lockfree code is viable. It's so tricky that it forces you to be minimal
+      in order to be correct, and I think there must be some law which says
+      that this has benefits.
+    - If everything seems like it should be perfectly parallel, but it isn't,
+      then you might be waiting on a shared memory bus. This was SAXPY's
+      lesson, but I had forgotten it.
+
+Human Rights Violations:
+
+while(test_rdy=FALSE)
+    yield(parent)
+Becomes:
+while(1)
+    yield(parent)
+
+do{LOCK_FREE_STACK_POP}while(stack->top.tag != local_top.tag || cmpxchg(...))
+Becomes:
+do{...}while(1)
+
+do{LOCK_FREE_STACK_POP}while(... || cmpxchg(*(__int128_t *)&local_top, ...)
+Is an instance of "type punning", which GCC turns into whatever it
+wants. Lesson: use unions.
