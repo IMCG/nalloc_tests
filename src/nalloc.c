@@ -8,7 +8,7 @@
  * nalloc's main features are thread-local segregated list subheaps, a
  * lockfree global slab allocator to manage subheaps, and a lockfree
  * inter-thread memory transfer mechanism to return freed blocks to their
- * original subheap. Nah lock.
+ * original subheap. Nah lock. 
  *
  * Why are the stack reads safe:
  * - wayward_blocks. Only 1 thread pops. No one else can pop the top and then
