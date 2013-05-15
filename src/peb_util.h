@@ -53,7 +53,7 @@
        })
 
 
-#define GETTIME(expr) CLOCK_GETTIME(expr)
+#define GETTIME(expr) TOD_GETTIME(expr)
 #define TIME(expr)                                                      \
     do{                                                                 \
         log(#expr ": %f ms", GETTIME((expr)));                          \
