@@ -1,0 +1,34 @@
+Usage:
+
+./natest 
+    -t [num threads]
+    -a [num allocations] 
+    -o [num iterations / num allocations] 
+    -p [1 = parallel benchmark, 2 = global pooling, 3 = producer-consumers]
+    -w [max number of writes to block <- untested]
+
+ex:
+./natest -t 2 -o 10000
+
+The makefile builds utest, which runs the tests with whatever malloc() is
+linked, and natest, which runs with nalloc statically linked.
+
+Replace natest with tctest.sh, jetest.sh, etc. to run with LD_PRELOAD pointing
+to tcmalloc, jemalloc, etc. I added their .so files to the repo, although it
+may not work if you're on a mac. In that case, build from the tarballs in
+other_allocators. I recall having to pass -fpermissive to gperftools via
+configure/make in order to compile.
+
+You can try to use libnalloc.so with LD_PRELOAD and some other test program,
+but it's not POSIX compliant yet, so it may whine at you and suicide.
+
+./natest.sh uses libnalloc.so via LD_PRELOAD. It'll be a bit slower because I
+haven't taken the time to deal with TLS in a .so-friendly manner.
+
+Core code is in nalloc.c. I disabled code related to freeing slabs/threads
+just so I didn't have to deal with it for my tests, but I'm confident that the
+approach works.
+
+Note: the commit named "Initial" is just me moving my working allocator out of
+my kernel, where I had better tools to test it, and into Linux userspace. I
+didn't start on May 3.
