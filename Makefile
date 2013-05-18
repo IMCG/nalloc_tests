@@ -8,7 +8,11 @@ SRCS=$(wildcard $(SRCDIR)/*.c $(SRCDIR)/*.S)
 _OBJS=$(patsubst %.c,%.o,$(patsubst %.S,%.o,$(SRCS)))
 OBJS=$(subst $(SRCDIR),$(OBJDIR),$(_OBJS))
 
-all: utest natest libnalloc.so
+all: dirs utest natest libnalloc.so
+dirs: obj
+
+obj: obj
+	mkdir obj
 
 -include $(OBJS:.o=.dep)
 
