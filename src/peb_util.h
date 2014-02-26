@@ -3,8 +3,6 @@
  * @author Alex Podolsky <apodolsk@andrew.cmu.edu>
  * 
  * @brief  Some globally useful utilities. 
- * 
- * See footnote about "zero" args.
  */
 
 #ifndef __PEB_UTIL_H__
@@ -49,7 +47,7 @@
        struct timeval __tend;                                           \
        gettimeofday(&__tend, NULL);                                     \
        1000 * (__tend.tv_sec - __tstart.tv_sec) +                       \
-           (double) (__tend.tv_usec - __tstart.tv_usec) / 1000.0;    \
+           (double) (__tend.tv_usec - __tstart.tv_usec) / 1000.0;       \
        })
 
 

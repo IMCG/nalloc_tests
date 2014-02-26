@@ -16,6 +16,7 @@
 #include <nalloc.h>
 #include <stdlib.h>
 #include <time.h>
+#include <asm_util.h>
 #include <global.h>
 #include <unistd.h>
 
@@ -422,6 +423,38 @@ void consumer_child(struct child_args *shared){
     profile_report();
 }
 
+#define NBYTES (64000 * PAGE_SIZE)
+/* #define NBYTES 128 */
+#define REPS 10000
+volatile int64_t update_mem[NBYTES];
+
+void plain_update_kid(void){
+    for(int r = 0; r < REPS; r++)
+        for(int i = 0; i < NBYTES/sizeof(int64_t); i++)
+            if(!update_mem[i])
+                update_mem[i] = 1;
+}
+
+void plain_update(void){
+    pthread_t kids[num_threads];
+    for(int i = 0; i < num_threads; i++)
+        if(kfork((entrypoint_t *) plain_update_kid, NULL, KERN_ONLY) < 0)
+            LOGIC_ERROR("Failed to fork.");
+}
+
+void cas_update_kid(void){
+    for(int r = 0; r < REPS; r++)
+        for(int i = 0; i < NBYTES/sizeof(int64_t); i++)
+            cmpxchg64b(1, &update_mem[i], 0);
+}
+
+void cas_update(void){
+    pthread_t kids[num_threads];
+    for(int i = 0; i < num_threads; i++)
+        if(kfork((entrypoint_t *) cas_update_kid, NULL, KERN_ONLY) < 0)
+            LOGIC_ERROR("Failed to fork.");
+}
+
 int main(int argc, char **argv){
     unmute_log();
 
@@ -464,6 +497,12 @@ int main(int argc, char **argv){
         break;
     case 3:
         TIME(producer_test());
+        break;
+    case 4:
+        TIME(plain_update());
+        break;
+    case 5:
+        TIME(cas_update());
         break;
     }
 
