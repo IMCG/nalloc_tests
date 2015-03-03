@@ -96,8 +96,8 @@ void *(malloc)(size size){
     if(size > MAX_BLOCK)
         return TODO(), NULL;
     block *b = (linalloc)(poly_heritage_of(size));
-    /* if(b) */
-    /*     assert(magics_valid(b, poly_heritage_of(size)->t->size)); */
+    if(b)
+        assert(magics_valid(b, poly_heritage_of(size)->t->size));
     return b;
 }
 
@@ -131,7 +131,7 @@ block *(alloc_from_slab)(slab *s, heritage *h){
     block *b;
     if(s->cold_blocks){
         b = (block *) &s->blocks[h->t->size * --s->cold_blocks];
-        /* assert(magics_valid(b, h->t->size)); */
+        assert(magics_valid(b, h->t->size));
         return b;
     }
     b = cof(stack_pop(&s->free_blocks), block, sanc);
@@ -167,14 +167,14 @@ slab *(slab_new)(heritage *h){
         if(h->t->lin_init)
             for(cnt b = 0; b < mb; b++)
                 h->t->lin_init((lineage *) &s->blocks[b * h->t->size]);
+        else
+            for(uint i = 0; i < s->cold_blocks; i++)
+                assert(write_magics((block *) &s->blocks[i * h->t->size],
+                                    h->t->size));
     }
     
     s->hot_slabs = h->hot_slabs;    
     s->tx.linrefs = 1;
-
-    /* size sz = h->t->size; */
-    /* for(uint i = 0; i < s->cold_blocks; i++) */
-    /*     assert(write_magics((block *) &s->blocks[i * sz], sz)); */
     return s;
 }
 
@@ -182,6 +182,7 @@ void (free)(void *b){
     lineage *l = (lineage *) b;
     if(!b)
         return;
+    assert(write_magics(l, slab_of(l)->tx.t->size));
     (linfree)(l);
 }
 void (linfree)(lineage *l){
@@ -189,7 +190,6 @@ void (linfree)(lineage *l){
     slab *s = slab_of(b);
     *b = (block){SANCHOR};
 
-    /* assert(write_magics(l, s->tx.t->size)); */
     assert(s->tx.t);
     assert(xadd(-s->tx.t->size, &bytes_used));
 

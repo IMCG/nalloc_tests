@@ -110,7 +110,7 @@ static void *mustp(void *p){
     ((uptr) (p) >= (uptr) (s) && (uptr) (p) < (uptr)((s) + 1))  \
 
 #define in_array(p, a)                                                 \
-    ((uptr) (p) >= (uptr) (s) && (uptr) (p) < (uptr)(s) + sizeof(s))   \
+    ((uptr) (p) >= (uptr) (a) && (uptr) (p) < (uptr)(a) + sizeof(a))   \
 
 #define is_pow2(n) ((n) && !((n) & ((n) - 1)))
 
