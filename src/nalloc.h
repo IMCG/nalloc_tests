@@ -1,103 +1,145 @@
-/**
- * @file   nalloc.h
- * @author Alex Podolsky <apodolsk@andrew.cmu.edu>
- * @date   Sun Oct 28 16:19:37 2012
- * 
- * @brief  
- * 
- */
-
-#ifndef NALLOC_H
-#define NALLOC_H
+#pragma once
 
 #include <list.h>
-#include <peb_macros.h>
-#include <peb_util.h>
-#include <pthread.h>
 #include <stack.h>
 
-#ifdef HIDE_NALLOC
-#define malloc nmalloc
-#define free nfree
-#define calloc ncalloc
-#define realloc nrealloc
-#endif
-
-#define NALLOC_MAGIC_INT 0x999A110C
-
-/* TODO: I know this is non-portable. I just don't want to bother generating
-   my own tids.  */
-#define INVALID_TID 0
-
-#define CACHELINE_SHIFT 6
-#define CACHELINE_SIZE (1 << 6)
-
-#define PAGE_SHIFT 12
-#define PAGE_SIZE (1 << PAGE_SHIFT)
-#define SLAB_SIZE (PAGE_SIZE)
-
-#define MIN_ALIGNMENT 16
-
-#define SLAB_ALLOC_BATCH 16
-#define IDEAL_FULL_SLABS 5
-
-#define MIN_BLOCK 16
-/* TODO: this is 512, aka way too small. Need bigger slabs. */
-#define MAX_BLOCK (SLAB_SIZE / 8)
-
-static const int bcache_size_lookup[] = {
-    16, 32, 48, 64, 80, 96, 112, 128,
-    256, 512, 
-};
-#define NBSTACKS ARR_LEN(bcache_size_lookup)
-
-typedef struct{
-    size_t size;
-} large_block_t;
-
-typedef struct{
-    sanchor_t sanc;
-} block_t;
-COMPILE_ASSERT(sizeof(block_t) <= MIN_BLOCK);
-
-#define FRESH_BLOCK {.sanc = FRESH_SANCHOR }
-
-typedef struct{
-    lfstack_t wayward_blocks;
-    simpstack_t priv_blocks;
-    pthread_t host_tid;
-    sanchor_t sanc;
-    unsigned int nblocks_contig;
-    size_t block_size;
-    uint8_t blocks[];
-} slab_t __attribute__((__aligned__(MIN_ALIGNMENT)));
-
-/* Note that the refcnt here is a dummy val. It should never reach zero. */
-/* Ignore emacs' crazy indentation. There's no simple way to fix it. */
-#define FRESH_SLAB {                                            \
-        .wayward_blocks = FRESH_STACK,                          \
-            .priv_blocks = FRESH_SIMPSTACK,                     \
-            .host_tid = INVALID_TID,                            \
-            .sanc = FRESH_SANCHOR,                              \
-            .nblocks_contig = 0,                                \
-            .block_size = 0,                                    \
-                 }
-
-COMPILE_ASSERT(sizeof(large_block_t) != sizeof(slab_t));
-COMPILE_ASSERT(aligned_pow2(sizeof(slab_t), MIN_ALIGNMENT));
-
 typedef struct {
-    size_t num_bytes;
-    size_t num_slabs;
-    size_t num_bytes_highwater;
-    size_t num_slabs_highwater;
-} nalloc_profile_t;
+    sanchor sanc;
+} block;
+typedef block lineage;
 
-void *malloc(size_t size);
-void free(void *buf);
-void *calloc(size_t nmemb, size_t size);
-void *realloc(void *ptr, size_t size);
+typedef const struct type{
+    const char *name;
+    size size;
+    checked err (*linref_up)(volatile void *l, const struct type *t);
+    void (*linref_down)(volatile void *l);
+    void (*lin_init)(lineage *b);
+} type;
+#define TYPE(t, lu, ld, li) {#t, sizeof(t), lu, ld, li}
 
-nalloc_profile_t *get_profile(void);
+typedef struct heritage{
+    lfstack slabs;
+    lfstack *hot_slabs;
+    cnt max_slabs;
+    cnt slab_alloc_batch;
+    type *t;
+    struct slab *(*new_slabs)(cnt nslabs);
+} heritage;
+#define HERITAGE(t, ms, sab, ns, override...)       \
+    {LFSTACK, &hot_slabs, ms, sab, t, ns, override}
+#define KERN_HERITAGE(t) HERITAGE(t, 16, 1, new_slabs)
+#define POSIX_HERITAGE(t) KERN_HERITAGE(t)
 
-#endif
+extern lfstack hot_slabs;
+
+typedef volatile struct slabfoot{
+    sanchor sanc;
+    stack free_blocks;
+    cnt cold_blocks;
+    void *owner;
+    struct heritage *her;
+    struct align(CACHELINE_SIZE) tyx {
+        type *t;
+        iptr linrefs;
+    } tx;
+    lfstack *hot_slabs;
+    lfstack wayward_blocks;
+} slabfoot;
+#define SLABFOOT {.free_blocks = STACK, .wayward_blocks = LFSTACK}
+
+#define MAX_BLOCK (SLAB_SIZE - sizeof(slabfoot))
+typedef struct align(SLAB_SIZE) slab{
+    u8 blocks[MAX_BLOCK];
+    slabfoot;
+}slab;
+
+typedef void (*linit)(void *);
+
+/* If ret != 0 and linfree(l) hasn't been called, then linref_up(l, h->t)
+   == 0 and linalloc(h') != ret for all h'. */
+checked void *linalloc(heritage *h);
+void linfree(lineage *l);
+/* If !ret and no (corresponding) call to linref_down(l) has been made,
+   then there's a set of heritages H where:
+   - linalloc(h') != l for all h' not in H.
+   - linref_up(l, t') != 0 for all t' != t.
+   - h->t == t for h in H.
+   - t->lin_init(l) has been called. Apart from that, no nalloc function
+   has written to the t->size - sizeof(lineage) bytes following l, even if
+   linfree(l) has been called.
+
+   If you use this right, you can deduce that l has the type you associate
+   with t.
+*/
+
+dbg extern iptr slabs_used;
+dbg extern cnt bytes_used;
+
+checked err linref_up(volatile void *l, type *t);
+void linref_down(volatile void *l);
+
+checked void *smalloc(size size);
+void sfree(void *b, size size);
+checked void *malloc(size size);
+void free(void *b);
+void *calloc(size nb, size bs);
+void *realloc(void *o, size size);
+
+typedef struct{
+    int baseline;
+} linref_account;
+void linref_account_open(linref_account *a);
+void linref_account_close(linref_account *a);
+err fake_linref_up(void);
+void fake_linref_down(void);
+
+typedef struct{
+    int linrefs_held;
+} nalloc_info;
+#define NALLOC_INFO {}
+
+#define linref_account(balance, e...)({                 \
+        linref_account laccount = (linref_account){};   \
+        linref_account_open(&laccount);                 \
+        typeof(e) account_expr = e;                     \
+        laccount.baseline += balance;                   \
+        linref_account_close(&laccount);                \
+        account_expr;                                   \
+    })                                                  \
+
+typedef struct{
+    cnt baseline;
+} byte_account;
+void byte_account_open(byte_account *a);
+void byte_account_close(byte_account *a);
+
+#define byte_account(balance, e...)({                   \
+        byte_account baccount = (byte_account){};       \
+        byte_account_open(&baccount);                   \
+        typeof(e) account_expr = e;                     \
+        baccount.baseline += balance;                   \
+        byte_account_close(&baccount);                  \
+        account_expr;                                   \
+    })                                                  \
+
+        
+#define pudef (type, "(typ){%}", a->name)
+#include <pudef.h>
+#define pudef (heritage, "(her){%, nslabs:%}", a->t, a->slabs.size)
+#include <pudef.h>
+#define pudef (slab, "(slab){%, refs:%, o:%, lfree:%, wfree:%}",        \
+               a->tx.t, a->tx.linrefs, a->owner, a->free_blocks.size,   \
+               a->wayward_blocks.size)
+#include <pudef.h>
+
+#define smalloc(as...) trace(NALLOC, 1, smalloc, as)
+#define sfree(as...) trace(NALLOC, 1, sfree, as)
+#define malloc(as...) trace(NALLOC, 1, malloc, as)
+#define smalloc(as...) trace(NALLOC, 1, smalloc, as)
+#define realloc(as...) trace(NALLOC, 1, realloc, as)
+#define calloc(as...) trace(NALLOC, 1, calloc, as)
+#define free(p) trace(NALLOC, 1, free, (void *) p)
+#define linalloc(as...) trace(NALLOC, 1, linalloc, as)
+#define linfree(as...) trace(NALLOC, 1, linfree, as)
+        
+        

@@ -1,49 +1,81 @@
-# Note: This is all BS. I don't actually know make.
-CC=gcc
-CFLAGS=-O0 -Wall -fplan9-extensions -D_GNU_SOURCE -std=gnu99 -g -Isrc -Wno-missing-braces -Wno-int-to-pointer-cast -pthread -fno-omit-frame-pointer
-LDFLAGS= -L/afs/cs/academic/class/15418-s13/public/lib -Xlinker -rpath -Xlinker /afs/cs/academic/class/15418-s13/public/lib -lprofiler -pthread -lrt
-SRCDIR=src
-OBJDIR=obj
-SRCS=$(wildcard $(SRCDIR)/*.c $(SRCDIR)/*.S)
-_OBJS=$(patsubst %.c,%.o,$(patsubst %.S,%.o,$(SRCS)))
-OBJS=$(subst $(SRCDIR),$(OBJDIR),$(_OBJS))
+BUILTIN_VARS:=$(.VARIABLES)
+CC:=gcc
+SRCD:=src
+OBJD:=obj
+INC:=$(shell find -L $(SRCD) -type d | sed s/^/-I/)
+HDRS:=$(shell find -L $(SRCD) -type f -name *.h)
+SRCS_C:=$(shell find -L $(SRCD) -type f -name *.c)
+SRCS_S:=$(shell find -L $(SRCD) -type f -name *.S)
+SRCS:=$(SRCS_C) $(SRCS_S)
+OBJS:=$(subst $(SRCD),$(OBJD),$(patsubst %.c,%.o,$(patsubst %.S,%.o,$(SRCS))))
+DIRS:=$(shell echo $(dir $(OBJS)) | tr ' ' '\n' | sort -u | tr '\n' ' ')
+CFLAGS:=$(INC)\
+	-O0 \
+	-fno-lto \
+	-fuse-linker-plugin\
+	-g\
+	-D_GNU_SOURCE\
+	-Wall \
+	-Wextra \
+	-Werror \
+	-Wcast-align\
+	-Wno-missing-field-initializers \
+	-Wno-ignored-qualifiers \
+	-Wno-missing-braces \
+	-Wno-unused-parameter \
+	-Wno-unused-function\
+	-Wno-unused-value\
+	-Wno-address\
+	-fplan9-extensions\
+	-Wno-unused-variable\
+	-std=gnu11\
+	-pthread\
+	-fno-omit-frame-pointer\
+	-include "global.h"\
+	-m64
+LD:=$(CC)
+LDFLAGS:=-fvisibility=hidden $(CFLAGS)
 
-all: dirs utest natest libnalloc.so
-dirs: obj
+all: test reference
 
-obj: obj
-	mkdir obj
+test: $(DIRS) $(SRCD)/TAGS $(OBJS) Makefile
+		+ $(LD) $(LDFLAGS) -o $@ $(OBJS)
+
+TEST_OBJS=$(filter-out $(OBJD)/nalloc.o, $(OBJS))
+reference: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
+			+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS)
+
+$(DIRS):
+	mkdir -p $@
+
+$(SRCD)/TAGS: $(SRCS) $(HDRS)
+	etags -o $(SRCD)/TAGS $(HDRS) $(SRCS)
+
+$(OBJS): Makefile
+
+$(OBJD)/%.o: $(SRCD)/%.c
+		$(CC) $(CFLAGS) -MM -MP -MT $(OBJD)/$*.o -o $(OBJD)/$*.dep $<
+		$(CC) $(CFLAGS) -o $@ -c $<;
+
+$(OBJD)/%.o: $(SRCD)/%.S
+		$(CC) $(CFLAGS) -MM -MP -MT $(OBJD)/$*.o -o $(OBJD)/$*.dep $<
+		$(CC) $(CFLAGS) -o $@ -c $<
 
 -include $(OBJS:.o=.dep)
 
-t-test: t-test1.c
-	gcc -O3 -lpthread -o $@ $<
-
-libnalloc.so: $(SRCS)
-		$(CC) $(CFLAGS) -fPIC -shared -o $@ $^
-
-# This is here so that I can set up a scheme where ONLY the test uses
-# nalloc. Better for debugging, as you can't run gdb&co on top of a broken
-# allocator.
-natest: $(OBJS)
-		$(CC) $(CFLAGS) $(LDFLAGS) -DHIDE_NALLOC -o $@ \
-		$(SRCDIR)/nalloc.c \
-		$(SRCDIR)/unit_tests.c \
-		$(filter-out obj/unit_tests.o,$(filter-out obj/nalloc.o,$^))
-
-utest: $(OBJS)
-		$(CC) $(LDFLAGS) -o $@ \
-		$(filter-out obj/nalloc.o, $^)
-
-$(OBJDIR)/%.o: $(SRCDIR)/%.c 
-		$(CC) $(CFLAGS) -o $@ -c $<;
-		gcc $(CFLAGS) -MM -MT $(OBJDIR)/$*.o -o $(OBJDIR)/$*.dep $^
-
-$(OBJDIR)/%.o: $(SRCDIR)/%.S
-		$(CC) $(CFLAGS) -o $@ -c $<
+check-syntax:
+		$(CC) $(CFLAGS) -c $(CHK_SOURCES) -o /dev/null
 
 clean:
-	rm $(OBJDIR)/*.o; 
-	rm $(OBJDIR)/*.dep; 
-	rm libnalloc.so; 
-	rm utest;
+	rm -rf $(OBJD) 
+	rm $(SRCD)/TAGS
+	rm -f test;
+
+define \n
+
+
+endef
+info::
+	$(foreach v, \
+		$(filter-out $(BUILTIN_VARS) BUILTIN_VARS \n, $(.VARIABLES)), \
+		$(info $(v) = $($(v)) ${\n}))

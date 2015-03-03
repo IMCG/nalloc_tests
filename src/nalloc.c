@@ -1,442 +1,361 @@
 /**
- * @file   nalloc.c
- * @author Alex Podolsky <apodolsk@andrew.cmu.edu>
- * @date   Sat Oct 27 19:16:19 2012
- * 
- * @brief A lockfree memory allocator.
+ * Lockfree slab allocator that can provide type-stable memory and
+ * customizably local caching of free blocks, or just do malloc.
  *
- * nalloc's main features are thread-local segregated list subheaps, a
- * lockfree global slab allocator to manage subheaps, and a lockfree
- * inter-thread memory transfer mechanism to return freed blocks to their
- * original subheap. Nah lock. 
+ * A lineage L is a block of memory s.t there's a type T s.t. if a call to
+ * linref_up(&L, &T) == 0 and no corresponding call to linref_down has yet
+ * been made, then:
+ * - There's a heritage H s.t. only linalloc(&H) may return &L, even if
+ * linfree(&L) is called.
+ * - T is unqiue.
+ * - No function in this file will ever write to any part of L except for
+ * its sizeof(lineage)-byte header.
  *
- * Why are the stack reads safe:
- * - wayward_blocks. Only 1 thread pops. No one else can pop the top and then
- * force it to segfault.
- * - free_slabs. Safe simply because I never return to the system. Was going
- * to say it's because unmaps happen before insertion to stack, but it's still
- * possible to read top, then someone pops top, uses it, and unmaps it before
- * reinserting. Could honestly just do a simple array. 
+ * A heritage H is a cache of lineages with associated type T s.t., if
+ * linalloc(&H) == L and no call to linfree(L) has been made, then
+ * linref_up(&L, &T) == 0. Also, H has a function block_init s.t. for all
+ * L, block_init(L) is only called the first time that linalloc(&H)
+ * returns L.
  *
+ * Lineages provide "type-stable" memory because, if you get a linref on a
+ * lineage L, then you've associated L with a type T s.t. only calls to
+ * linalloc on heritages also associated with T could return L. Combined
+ * with the no-write promise, this lets you safely free and reallocate L
+ * without losing guarantees about the validity of its contents, but only
+ * into the limited subset of free blocks wich are associated with T.
+ *
+ * malloc() and co are wrappers around linalloc and linfree, using
+ * heritages keyed to "polymorphic types" of fixed sizes (bullshit) and
+ * no-op block_init functions.
+ *
+ * TODO: some heritage_destroy function is needed. Doing nothing upon
+ * thread death doesn't break anything, but it leaks the _full_ slabs in
+ * all thread-local heritages.
+ *
+ * TODO!!!: blocks must be linited before linref_up can return true. Then
+ * linref_up provides guarantee that the only writes that occurred in
+ * nalloc.c were to the block header and via linit.
  */
 
 #define MODULE NALLOC
 
-#include <list.h>
 #include <stack.h>
-#include <sys/mman.h>
-
+#include <list.h>
 #include <nalloc.h>
-#include <global.h>
+#include <atomics.h>
+#include <thread.h>
 
-static void *large_alloc(size_t size);
-static void large_dealloc(large_block_t *block);
+#define HEAP_DBG 1
+#define LINREF_ACCOUNT_DBG 1
+#define NALLOC_MAGIC_INT 0x01FA110C
+#define LINREF_VERB 2
 
-static int bcacheidx_of(size_t size);
+typedef struct tyx tyx;
 
-static void *alloc(size_t size);
+dbg iptr slabs_used;
+dbg cnt bytes_used;
 
-static int slab_is_full(slab_t *s);
-static int slab_num_priv_blocks(slab_t *s);
-static int slab_is_on_priv_stack(slab_t *s);
-static unsigned int slab_max_size(slab_t *s);
-static block_t *alloc_from_slab(slab_t *slab);
-static void dealloc_from_slab(block_t *b, slab_t *s);
-static slab_t *slab_install_new(size_t size, int sizeidx);
-/* static void slab_free(slab_t *freed, int cidx); */
-static void steal_or_dealloc_slab(slab_t *s, int cidx);
+static slab *slab_new(heritage *h);
+static block *alloc_from_slab(slab *s, heritage *h);
+static void dealloc_from_slab(block *b, slab *s);
+static unsigned int slab_max_blocks(const slab *s);
+static cnt slab_num_priv_blocks(const slab *s);
+static slab *slab_of(const block *b);
+static err write_magics(block *b, size bytes);         
+static err magics_valid(block *b, size bytes);
+static void slab_ref_down(slab *s, lfstack *hot_slabs);
 
-static void dealloc(block_t *b);
-static void return_wayward_block(block_t *b, slab_t *slab, int cidx);
+#define slab_new(as...) trace(NALLOC, 2, slab_new, as)
+#define slab_ref_down(as...) trace(NALLOC, LINREF_VERB, slab_ref_down, as)
 
-static slab_t *slab_of(block_t *b);
+lfstack hot_slabs = LFSTACK;
 
-static void free_slabs_atexit();
-static void first_time_init(void);
-static int dynamic_init(void);
+#define PTYPE(s, ...) {#s, s, NULL, NULL, NULL}
+static const type polytypes[] = { MAP(PTYPE, _,
+        16, 32, 48, 64, 80, 96, 112, 128,
+        192, 256, 384, 512, 1024, MAX_BLOCK)
+};
 
-static void profile_bytes(size_t nbytes);
-static void profile_slabs(size_t nslabs);
-static int write_block_magics(block_t *b, slab_t *s);
-static int block_magics_valid(block_t *b, slab_t *s);
-
-
-/* DANGER: It happens to be the case that an uninitialized lfstack is all
-   0. If that's not true, then you need a barrier during first time init
-   (pthread_once won't suffice). */
-__attribute__ ((__aligned__(CACHELINE_SIZE)))
-static lfstack_t dirty_slabs[NBSTACKS];
-
-__attribute__ ((__aligned__(CACHELINE_SIZE)))
-static lfstack_t clean_slabs = FRESH_STACK;
-
-static __thread simpstack_t priv_slabs[NBSTACKS];
-
-__attribute__ ((__aligned__(CACHELINE_SIZE)))
-static __thread nalloc_profile_t profile;
-
-/* Accounting info for pthread's wonky thread destructor setup. */
-static pthread_once_t key_rdy = PTHREAD_ONCE_INIT;
-static pthread_key_t destructor_key = 0;
-
-void *malloc(size_t size){
-    trace(size, lu);
-    void *out;
-    if(size == 0)
-        return NULL;
-    if(size > MAX_BLOCK){
-        large_block_t *large_found = large_alloc(size);
-        /* profile_bytes(large_found->size); */
-        out = large_found ? large_found + 1 : NULL;
-    } else
-        out = alloc(size);
-    PPNT(out);
-    return out;
-}
-
-void free(void *buf){
-    trace(buf, p);
-    if(!buf)
-        return;
-    /* TODO: Assumes no one generates pointers near page boundaries. Fine now,
-       but won't cut it for large slabs. */
-    if(aligned_pow2((large_block_t *) buf - 1, PAGE_SIZE)){
-        large_block_t *large = (large_block_t *) buf - 1;
-        profile_bytes(0 - large->size);
-        large_dealloc(large);
-        return;
-    }
-    
-    dealloc(buf);
-}
-
-void *calloc(size_t nmemb, size_t size){
-    void *found = malloc(nmemb * size);
-    if(!found)
-        return NULL;
-    memset(found, 0, nmemb * size);
-    return found;
-}
-
-void *realloc(void *ptr, size_t size){
-    void *new = malloc(size);
-    if(new){
-        size_t old_size = slab_of(ptr)->block_size;
-        memcpy(new, ptr, min(size, old_size));
-    }
-    free(ptr);
-    return ptr;
-}
-
-static
-void *large_alloc(size_t size){
-    size = align_up_pow2(size, PAGE_SIZE);
-    large_block_t *found =
-        mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
-             -1, 0);
-    if(!found)
-        return NULL;
-    found->size = size;
-    return found;
-}
-
-static
-void large_dealloc(large_block_t *block){
-    assert(aligned(block, PAGE_SIZE));
-    munmap(block, block->size);
-}
-
-static
-int bcacheidx_of(size_t size){
-    assert(size);
-    /* Yes, this should be turned into a non-brittle thing. Whatever. It's 5AM. */
-    if(size <= 128)
-        return (size - 1) >> 4;
-    if(size <= 256)
-        return 8;
-    return 9;
-        
-    /* for(int i = 0; i < NBSTACKS; i++) */
-    /*     if(size <= bcache_size_lookup[i]) */
-    /*         return i; */
-    LOGIC_ERROR("Little allocator vs big request: %lu.", size);
-}
-
-static
-void *alloc(size_t size){
-    trace2(size, lu);
-
-    if(dynamic_init())
-        return NULL;
-
-    block_t *found;
-    int cidx = bcacheidx_of(size);
-    size_t rounded = bcache_size_lookup[cidx];
-    
-    slab_t *slab = lookup_sanchor(simpstack_peek(&priv_slabs[cidx]),
-                                  slab_t, sanc);
-    if(!slab){
-        slab = slab_install_new(rounded, cidx);
-        if(!slab)
-            return NULL;
-    }
-
-    PINT(slab->nblocks_contig);
-    found = alloc_from_slab(slab);
-    if(!found)
-        return NULL;
-    PINT(slab->nblocks_contig);
-    
-    if(slab_num_priv_blocks(slab) == 0){
-        simpstack_pop(&priv_slabs[cidx]);
-        assert(!slab_is_on_priv_stack(slab));
-    }
-
-    assert(found);
-    rassert(slab_of(found)->block_size, >=, size);
-    assert(aligned(found, MIN_ALIGNMENT));
-    return found;
-}
-
-static
-int slab_num_priv_blocks(slab_t *s){
-    return s->priv_blocks.size + s->nblocks_contig;
-}
- 
-static
-int slab_is_full(slab_t *s){
-    int npriv = slab_num_priv_blocks(s);
-    int max = slab_max_size(s);
-    assert(npriv + stack_size(&s->wayward_blocks) <= max);
-    return npriv == max
-        || npriv + stack_size(&s->wayward_blocks) == max;
-}
- 
-static
-int slab_is_on_priv_stack(slab_t *s){
-    return slab_num_priv_blocks(s) != 0;
-}
-
-static 
-unsigned int slab_max_size(slab_t *s){
-    return (SLAB_SIZE - sizeof(slab_t)) / s->block_size;
-}
-
-static
-block_t *alloc_from_slab(slab_t *s){
-    trace3(s, p);
-    
-    if(s->nblocks_contig)
-        return (block_t *) &s->blocks[s->block_size * --s->nblocks_contig];
-    block_t *found = simpstack_pop_lookup(block_t, sanc, &s->priv_blocks);
-    if(!found){
-        int size;
-        found = lookup_sanchor(stack_pop_all(&s->wayward_blocks, &size),
-                               block_t, sanc);
-        if(found)
-            simpstack_replace(found->sanc.next, &s->priv_blocks, size);
-    }
-    assert(block_magics_valid(found, s));
-    return found;
-}
-
-static
-void dealloc_from_slab(block_t *b, slab_t *s){
-    trace3(b, p, s, p);
-    
-    if(b == (block_t *) &s->blocks[s->nblocks_contig * s->block_size])
-        s->nblocks_contig++;
-    else
-        simpstack_push(&b->sanc, &s->priv_blocks);
-}
-
-static
-slab_t *slab_install_new(size_t size, int cidx){
-    trace3(size, lu, cidx, d);
-    
-    slab_t *found = stack_pop_lookup(slab_t, sanc, &clean_slabs);
-    if(found){
-        log("clean");
-        found->block_size = size;
-        found->nblocks_contig = slab_max_size(found);
-    } else {
-        found = stack_pop_lookup(slab_t, sanc, &dirty_slabs[cidx]);
-        if(!found){
-            /* Note the use of MAP_POPULATE to escape page faults that *will*
-               otherwise happen due to overcommit. */
-            found = mmap(NULL, SLAB_SIZE * SLAB_ALLOC_BATCH,
-                         PROT_READ | PROT_WRITE,
-                         MAP_POPULATE | MAP_PRIVATE | MAP_ANONYMOUS,
-                         -1, 0);
-            if(!found)
-                return NULL;
-            
-            /* Note that we start from 1. */
-            for(int i = 1; i < SLAB_ALLOC_BATCH; i++){
-                slab_t *extra = (slab_t*) ((uptr_t) found + i * SLAB_SIZE);
-                *extra = (slab_t) FRESH_SLAB;
-                stack_push(&extra->sanc, &clean_slabs);
-            }
-            *found = (slab_t) FRESH_SLAB;
-            found->block_size = size;
-            found->nblocks_contig = slab_max_size(found);
-
-            log("new clean");
-        }
-    }
-
-    assert(found->host_tid == INVALID_TID);
-    assert(found->block_size == size);
-
-    found->host_tid = pthread_self();
-    simpstack_push(&found->sanc, &priv_slabs[cidx]);
-
-    PPNT(found);
-    PLUNT(found->block_size);
-    
-    profile_slabs(1);
-
-    assert(aligned(found, SLAB_SIZE));
-    
-    return found;
-}
-
-/* static */
-/* void try_freeing_head_slab(int cidx){ */
-/*     sanchor_t top = simpstack_peek(&priv_slabs[cidx]); */
-/*     if(priv_slabs) */
-/*     s->host_tid = INVALID_TID; */
-/*     stack_push(&s->sanc, &clean_slabs); */
-/*     profile_slabs(-1); */
-/* } */
-
-static
-void dealloc(block_t *b){
-    trace2(b, p);
-
-    slab_t *s = slab_of(b);
-    int cidx = bcacheidx_of(s->block_size);
-
-    *b = (block_t) FRESH_BLOCK;
-    assert(write_block_magics(b, s));
-
-    if(s->host_tid == pthread_self()){
-        if(!slab_is_on_priv_stack(s))
-            simpstack_push(&s->sanc, &priv_slabs[cidx]);
-        
-        dealloc_from_slab(b, s);
-        if(slab_is_full(s) && priv_slabs[cidx].size >= IDEAL_FULL_SLABS)
-            (void) 1;
-            /* try_freeing_head_slab(cidx); */
-            /* Consider freeing. */
-    }
-    else
-        return_wayward_block(b, s, cidx);
-}
-
-static
-void return_wayward_block(block_t *b, slab_t *s, int cidx){
-    if(slab_is_full(s) && !slab_is_on_priv_stack(s))
-        steal_or_dealloc_slab(s, cidx);
-    else
-        stack_push(&b->sanc, &s->wayward_blocks);
-        
-}
-
-static
-void steal_or_dealloc_slab(slab_t *s, int cidx){
-    if(priv_slabs[cidx].size < IDEAL_FULL_SLABS){
-        s->host_tid = pthread_self();
-        simpstack_push(&s->sanc, &priv_slabs[cidx]);
-    }
-    else{
-        s->host_tid = INVALID_TID;
-        stack_push(&s->sanc, &clean_slabs);
-    }
-}
-
-static
-slab_t *slab_of(block_t *b){
-    return (slab_t *) align_down_pow2(b, PAGE_SIZE);
-}
-
-/* Prototyped without args for compatibility with pthread_key_create. */
-static
-void free_slabs_atexit(){
-    /* TODO: Obvious placeholder. */
-}
-
-static
-void first_time_init(void){
-    pthread_key_create(&destructor_key, free_slabs_atexit);
+#define PHERITAGE(i, ...)                                           \
+    HERITAGE(&polytypes[i], 8, 1, new_slabs)
+static heritage poly_heritages[] = {
+    ITERATE(PHERITAGE, _, 14)
 };
 
 static
-int dynamic_init(void){
-    static __thread int init_done = 0;
-    if(!init_done){
-        pthread_once(&key_rdy, first_time_init);
-        if(pthread_setspecific(destructor_key, (void*) !NULL))
-            return -1;
-        init_done = 1;
+heritage *poly_heritage_of(size size){
+    for(uint i = 0; i < ARR_LEN(polytypes); i++)
+        if(polytypes[i].size >= size)
+            return &poly_heritages[i];
+    EWTF();
+}
+
+void *(malloc)(size size){
+    if(!size)
+        return TODO(), NULL;
+    if(size > MAX_BLOCK)
+        return TODO(), NULL;
+    block *b = (linalloc)(poly_heritage_of(size));
+    /* if(b) */
+    /*     assert(magics_valid(b, poly_heritage_of(size)->t->size)); */
+    return b;
+}
+
+void *(linalloc)(heritage *h){
+    if(poisoned())
+        return NULL;
+    
+    slab *s = cof(lfstack_pop(&h->slabs), slab, sanc);
+    if(!s && !(s = slab_new(h)))
+        return EOOR(), NULL;
+
+    assert(aligned_pow2(s, SLAB_SIZE));
+    assert(!s->owner);
+    block *b = alloc_from_slab(s, h);
+    if(slab_num_priv_blocks(s))
+        lfstack_push(&s->sanc, &h->slabs);
+    else{
+        s->owner = this_thread();
+        s->her = h;
     }
-    return 0;
+
+    assert(xadd(h->t->size, &bytes_used), 1);
+    
+    assert(b);
+    assert(aligned_pow2(b, sizeof(dptr)));
+    return b;
 }
 
 static
-void profile_bytes(size_t nbytes){
-    return;
-    profile.num_bytes_highwater =
-        max(profile.num_bytes += nbytes, profile.num_bytes_highwater);
+block *(alloc_from_slab)(slab *s, heritage *h){
+    block *b;
+    if(s->cold_blocks){
+        b = (block *) &s->blocks[h->t->size * --s->cold_blocks];
+        /* assert(magics_valid(b, h->t->size)); */
+        return b;
+    }
+    b = cof(stack_pop(&s->free_blocks), block, sanc);
+    if(b)
+        return b;
+    s->free_blocks = lfstack_pop_all(&s->wayward_blocks, 1);
+    return cof(stack_pop(&s->free_blocks), block, sanc);
+}
+
+CASSERT(is_pow2(SLAB_SIZE));
+static
+slab *(slab_new)(heritage *h){
+    slab *s = cof(lfstack_pop(h->hot_slabs), slab, sanc);
+    if(!s){
+        s = h->new_slabs(h->slab_alloc_batch);
+        if(!s)
+            return NULL;
+        for(slab *si = s; si != &s[h->slab_alloc_batch]; si++){
+            si->slabfoot = (slabfoot) SLABFOOT;
+            if(si != s)
+                lfstack_push(&si->sanc, h->hot_slabs);
+        }
+    }
+    assert(xadd(1, &slabs_used) >= 0);
+    assert(aligned_pow2(s, SLAB_SIZE));
+    assert(!s->tx.linrefs && !s->owner);
+    assert(!s->wayward_blocks.size);
+    
+    s->her = h;
+    if(s->tx.t != h->t){
+        s->tx = (tyx){h->t};
+        cnt mb = s->cold_blocks = slab_max_blocks(s);
+        if(h->t->lin_init)
+            for(cnt b = 0; b < mb; b++)
+                h->t->lin_init((lineage *) &s->blocks[b * h->t->size]);
+    }
+    
+    s->hot_slabs = h->hot_slabs;    
+    s->tx.linrefs = 1;
+
+    /* size sz = h->t->size; */
+    /* for(uint i = 0; i < s->cold_blocks; i++) */
+    /*     assert(write_magics((block *) &s->blocks[i * sz], sz)); */
+    return s;
+}
+
+void (free)(void *b){
+    lineage *l = (lineage *) b;
+    if(!b)
+        return;
+    (linfree)(l);
+}
+void (linfree)(lineage *l){
+    block *b = l;
+    slab *s = slab_of(b);
+    *b = (block){SANCHOR};
+
+    /* assert(write_magics(l, s->tx.t->size)); */
+    assert(s->tx.t);
+    assert(xadd(-s->tx.t->size, &bytes_used));
+
+    heritage *h = s->her;
+    if(s->owner == this_thread() && h->slabs.size < h->max_slabs){
+        /* TODO: yeah, you own it till you free 1 block. Not so
+           great. More complicated scheme could ensure that it's not lost
+           if you don't push it upon first. Consider
+           lfstack_push_if(size_is,..)*/
+        s->owner = NULL;
+        dealloc_from_slab(b, s);
+        lfstack_push(&s->sanc, &h->slabs);
+    }else{
+        int nwb = lfstack_push(&b->sanc, &s->wayward_blocks);
+        if(&s->blocks[s->tx.t->size * (nwb + 2)] > &s->blocks[MAX_BLOCK]){
+            assert(!s->free_blocks.size);
+            s->cold_blocks = s->wayward_blocks.size;
+            s->wayward_blocks = (lfstack) LFSTACK;
+            slab_ref_down(s, s->hot_slabs);
+        }
+    }
 }
 
 static
-void profile_slabs(size_t nslabs){
-    return;
-    profile.num_slabs_highwater =
-        max(profile.num_slabs += nslabs, profile.num_slabs_highwater);
-}
-
-nalloc_profile_t *get_profile(void){
-    return &profile;
+void (dealloc_from_slab)(block *b, slab *s){
+    stack_push(&b->sanc, &s->free_blocks);
 }
 
 static
-int write_block_magics(block_t *b, slab_t *s){
+void (slab_ref_down)(slab *s, lfstack *hot_slabs){
+    assert(s->tx.linrefs > 0);
+    assert(s->tx.t);
+    if(xadd((uptr) -1, &s->tx.linrefs) == 1){
+        assert(xadd(-1, &slabs_used));
+        s->owner = NULL;
+        s->her = NULL;
+        lfstack_push(&s->sanc, hot_slabs);
+    }
+}
+
+err (linref_up)(volatile void *l, type *t){
+    assert(l);
+    if(l < heap_start() || l > heap_end())
+        return EARG();
+    
+    slab *s = slab_of((void *) l);
+    for(tyx tx = s->tx;;){
+        if(tx.t != t || !tx.linrefs)
+            return EARG("Wrong type.");
+        log(LINREF_VERB, "linref up! % % %", l, t, tx.linrefs);
+        assert(tx.linrefs > 0);
+        if(cas2_won(((tyx){t, tx.linrefs + 1}), &s->tx, &tx))
+            return T->nallocin.linrefs_held++, 0;
+    }
+}
+
+void (linref_down)(volatile void *l){
+    T->nallocin.linrefs_held--;
+    slab *s = slab_of((void *) l);
+    slab_ref_down(s, s->hot_slabs);
+}
+
+static
+unsigned int slab_max_blocks(const slab *s){
+    return MAX_BLOCK / s->tx.t->size;
+}
+
+static
+cnt slab_num_priv_blocks(const slab *s){
+    return s->free_blocks.size + s->cold_blocks;
+}
+
+static
+slab *(slab_of)(const block *b){
+    return cof_aligned_pow2(b, slab);
+}
+
+void *(smalloc)(size size){
+    return (malloc)(size);
+};
+
+void (sfree)(void *b, size size){
+    assert(slab_of(b)->tx.t->size >= size);
+    (free)(b);
+}
+
+void *(calloc)(size nb, size bs){
+    u8 *b = (malloc)(nb * bs);
+    if(b)
+        memset(b, 0, nb * bs);
+    return b;
+}
+
+void *(realloc)(void *o, size size){
+    u8 *b = (malloc)(size);
+    if(b && o)
+        memcpy(b, o, size);
+    free(o);
+    return b;
+}
+
+static
+int write_magics(block *b, size bytes){
     if(!HEAP_DBG)
         return 1;
     int *magics = (int *) (b + 1);
-    for(int i = 0; i < (s->block_size - sizeof(*b)) / sizeof(*magics); i++)
+    for(size i = 0; i < (bytes - sizeof(*b))/sizeof(*magics); i++)
         magics[i] = NALLOC_MAGIC_INT;
     return 1;
 }
 
 static
-int block_magics_valid(block_t *b, slab_t *s){
+int magics_valid(block *b, size bytes){
     if(!HEAP_DBG)
         return 1;
     int *magics = (int *) (b + 1);
-    for(int i = 0; i < (s->block_size - sizeof(*b)) / sizeof(*magics); i++)
-        rassert(magics[i], ==, NALLOC_MAGIC_INT);
+    for(size i = 0; i < (bytes - sizeof(*b))/sizeof(*magics); i++)
+        assert(magics[i] == NALLOC_MAGIC_INT);
     return 1;
 }
 
-void posix_memalign(){
-    UNIMPLEMENTED();
+err fake_linref_up(void){
+    T->nallocin.linrefs_held++;
+    return 0;
 }
 
-void aligned_alloc(){
-    UNIMPLEMENTED();
+void fake_linref_down(void){
+    T->nallocin.linrefs_held--;
 }
 
-void *valloc(){
-    UNIMPLEMENTED();
+void linref_account_open(linref_account *a){
+    assert(a->baseline = T->nallocin.linrefs_held, 1);
 }
 
-void *memalign(){
-    UNIMPLEMENTED();
+void linref_account_close(linref_account *a){
+    if(LINREF_ACCOUNT_DBG)
+        assert(T->nallocin.linrefs_held == a->baseline);
 }
 
-void *pvalloc(){
-    UNIMPLEMENTED();
+void byte_account_open(byte_account *a){
+    assert(a->baseline = bytes_used, 1);
 }
+
+void byte_account_close(byte_account *a){
+    assert(a->baseline == bytes_used);
+}
+
+void *memalign(size align, size sz){
+    EWTF();
+    assert(sz <= MAX_BLOCK
+           && align < PAGE_SIZE
+           && align * (sz / align) == align);
+    if(!is_pow2(align) || align < sizeof(void *))
+        return NULL;
+    return malloc(sz);
+}
+int posix_memalign(void **mptr, size align, size sz){
+    return (*mptr = memalign(align, sz)) ? 0 : -1;
+}
+void *pvalloc(size sz){
+    EWTF();
+}
+void *aligned_alloc(size align, size sz){
+    return memalign(align, sz);
+}
+void *valloc(size sz){
+    EWTF();
+}
+
