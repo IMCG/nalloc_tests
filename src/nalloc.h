@@ -3,6 +3,8 @@
 #include <list.h>
 #include <stack.h>
 
+#define MAX_BLOCK SLAB_SIZE
+
 typedef struct {
     sanchor sanc;
 } block;
@@ -31,27 +33,6 @@ typedef struct heritage{
 #define POSIX_HERITAGE(t) KERN_HERITAGE(t)
 
 extern lfstack hot_slabs;
-
-typedef volatile struct slabfoot{
-    sanchor sanc;
-    stack free_blocks;
-    cnt cold_blocks;
-    void *owner;
-    struct heritage *her;
-    struct align(CACHELINE_SIZE) tyx {
-        type *t;
-        iptr linrefs;
-    } tx;
-    lfstack *hot_slabs;
-    lfstack wayward_blocks;
-} slabfoot;
-#define SLABFOOT {.free_blocks = STACK, .wayward_blocks = LFSTACK}
-
-#define MAX_BLOCK (SLAB_SIZE - sizeof(slabfoot))
-typedef struct align(SLAB_SIZE) slab{
-    u8 blocks[MAX_BLOCK];
-    slabfoot;
-}slab;
 
 typedef void (*linit)(void *);
 
@@ -126,10 +107,6 @@ void byte_account_close(byte_account *a);
 #define pudef (type, "(typ){%}", a->name)
 #include <pudef.h>
 #define pudef (heritage, "(her){%, nslabs:%}", a->t, a->slabs.size)
-#include <pudef.h>
-#define pudef (slab, "(slab){%, refs:%, o:%, lfree:%, wfree:%}",        \
-               a->tx.t, a->tx.linrefs, a->owner, a->free_blocks.size,   \
-               a->wayward_blocks.size)
 #include <pudef.h>
 
 #define smalloc(as...) trace(NALLOC, 1, smalloc, as)

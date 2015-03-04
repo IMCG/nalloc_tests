@@ -18,9 +18,9 @@
 
 typedef void *(entrypoint)(void *);
 
-cnt nthreads = 10;
+cnt nthreads = 100;
 cnt max_allocs = 1000;
-cnt niter = 1000;
+cnt niter = 10000;
 cnt max_writes = 8;
 cnt max_size = 128;
 bool print_profile = 0;

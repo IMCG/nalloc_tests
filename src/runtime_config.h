@@ -2,4 +2,7 @@
 #define PAGE_SIZE   (1 << PAGE_SHIFT)
 #define CACHELINE_SIZE 64
 
-#define SLAB_SIZE (PAGE_SIZE)
+#define HEAP_MAX 0xFFFFFFFFFFFF
+#define HEAP_MIN 0x7ffff7ff0000
+
+#define SLAB_SIZE PAGE_SIZE

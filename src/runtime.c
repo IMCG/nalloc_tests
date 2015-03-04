@@ -3,24 +3,13 @@
 
 #define MAX_REALIGNS 16
 
+CASSERT(SLAB_SIZE == PAGE_SIZE);
 struct slab *new_slabs(cnt batch){
     struct slab *s = mmap(NULL, SLAB_SIZE * batch, PROT_WRITE,
                           MAP_PRIVATE | MAP_POPULATE | MAP_ANONYMOUS, -1, 0);
-    if(s == MAP_FAILED)
-        return EOOR(), NULL;
-    static cnt realigns = 0;
-    if(!aligned_pow2(s, SLAB_SIZE)){
-        assert(realigns++ < MAX_REALIGNS);
-        /* munmap(s, SLAB_SIZE * batch); */
-        s = mmap(NULL, SLAB_SIZE + SLAB_SIZE * batch, PROT_WRITE,
-                 MAP_PRIVATE | MAP_POPULATE | MAP_ANONYMOUS, -1, 0);
-        if(s == MAP_FAILED)
-            return NULL;
-        slab *sa = align_up_pow2(s, SLAB_SIZE);
-        munmap(s, SLAB_SIZE * (sa - s));
-        s = sa;
-    }
+    pp(s);
     return s == MAP_FAILED ? EOOR(), NULL : s;
+    
 }
 
 #include <pthread.h>
@@ -51,8 +40,10 @@ err kyield(tid t){
 }
 
 void *heap_start(){
-    extern void *end;
-    return &end;
+    TODO();
+    return NULL;
+    /* extern void *end; */
+    /* return &end; */
 }
 
 /* TODO: /proc/self/nonsense */

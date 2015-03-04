@@ -13,6 +13,7 @@ CFLAGS:=$(INC)\
 	-O3 \
 	-flto=jobserver \
 	-fuse-linker-plugin\
+	-mcmodel=medium\
 	-g\
 	-D_GNU_SOURCE\
 	-Wall \
