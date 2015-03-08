@@ -10,8 +10,8 @@ SRCS:=$(SRCS_C) $(SRCS_S)
 OBJS:=$(subst $(SRCD),$(OBJD),$(patsubst %.c,%.o,$(patsubst %.S,%.o,$(SRCS))))
 DIRS:=$(shell echo $(dir $(OBJS)) | tr ' ' '\n' | sort -u | tr '\n' ' ')
 CFLAGS:=$(INC)\
-	-O3 \
-	-flto=jobserver \
+	-Og \
+	-flto \
 	-fuse-linker-plugin\
 	-mcmodel=medium\
 	-g\
@@ -35,16 +35,16 @@ CFLAGS:=$(INC)\
 	-include "global.h"\
 	-m64
 LD:=$(CC)
-LDFLAGS:=-fvisibility=hidden $(CFLAGS)
+LDFLAGS:=-fvisibility=hidden -lprofiler $(CFLAGS)
 
-all: test reference
+all: test ref
 
 test: $(DIRS) $(SRCD)/TAGS $(OBJS) Makefile
-		+ $(LD) $(LDFLAGS) -o $@ $(OBJS)
+	+ $(LD) $(LDFLAGS) -o $@ $(OBJS)
 
 TEST_OBJS=$(filter-out $(OBJD)/nalloc.o, $(OBJS))
-reference: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
-			+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS)
+ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
+	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS)
 
 $(DIRS):
 	mkdir -p $@

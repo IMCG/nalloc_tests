@@ -1,14 +1,22 @@
 #include <sys/mman.h>
-#include <nalloc.h>
-
-#define MAX_REALIGNS 16
+#include <atomics.h>
 
 CASSERT(SLAB_SIZE == PAGE_SIZE);
-struct slab *new_slabs(cnt batch){
-    struct slab *s = mmap(NULL, SLAB_SIZE * batch, PROT_WRITE,
-                          MAP_PRIVATE | MAP_POPULATE | MAP_ANONYMOUS, -1, 0);
+struct slab *(new_slabs)(cnt batch){
+    static struct slab *brk = (struct slab *) HEAP_MIN;
+    struct slab *s = brk;
+    cnt loops = 0;
+    do{
+        s = xadd(SLAB_SIZE * batch, &brk);
+        assert(loops++ < 4);
+    }
+    while(MAP_FAILED == mmap(s, SLAB_SIZE * batch, PROT_WRITE,
+                             MAP_PRIVATE | MAP_POPULATE | MAP_ANONYMOUS, -1, 0));
     pp(s);
-    return s == MAP_FAILED ? EOOR(), NULL : s;
+    return s;
+    /* struct slab *s = mmap(NULL, SLAB_SIZE * batch, PROT_WRITE, */
+    /*                       MAP_PRIVATE | MAP_POPULATE | MAP_ANONYMOUS, -1, 0); */
+    /* return s == MAP_FAILED ? EOOR(), NULL : s; */
     
 }
 

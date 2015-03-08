@@ -59,20 +59,19 @@ typedef struct tyx tyx;
 typedef volatile struct slabman{
     sanchor sanc;
     stack free_blocks;
-    cnt cold_blocks;
-    void *owner;
-    struct heritage *her;
-    lfstack *hot_slabs;
-    struct align(sizeof(dptr)) tyx {
+    cnt contig_blocks;
+    heritage *volatile her;
+    volatile struct align(sizeof(dptr)) tyx {
         type *t;
         iptr linrefs;
     } tx;
-    lfstack wayward_blocks;
+    lfstack hot_blocks;
 } slabman;
-#define SLAB {.free_blocks = STACK, .wayward_blocks = LFSTACK}
-#define pudef (slabman, "(slab){%, refs:%, o:%, lfree:%, wfree:%}",     \
-               a->tx.t, a->tx.linrefs, a->owner, a->free_blocks.size,   \
-               a->wayward_blocks.size)
+#define SLAB {.free_blocks = STACK, .hot_blocks = LFSTACK}
+#define pudef (slabman, "(slab){%, refs:%, contig:%, free:%, hot:%}",   \
+               a->tx.t, a->tx.linrefs, a->contig_blocks,                \
+               stack_size(&a->free_blocks),                             \
+               lfstack_size(&a->hot_blocks))
 #include <pudef.h>
 
 typedef struct align(SLAB_SIZE) slab{
@@ -81,27 +80,27 @@ typedef struct align(SLAB_SIZE) slab{
 
 static slabman *slab_new(heritage *h);
 static block *alloc_from_slab(slabman *s, heritage *h);
-static void dealloc_from_slab(block *b, slabman *s);
+static err recover_hot_blocks(slabman *s);
 static unsigned int slab_max_blocks(const slabman *s);
-static cnt slab_num_priv_blocks(const slabman *s);
+static bool slab_fully_hot(const slabman *s);
 static slabman *slab_of(const block *b);
 static u8 *blocks_of(const slabman *s);
 static err write_magics(block *b, size bytes);         
 static err magics_valid(block *b, size bytes);
-static void slab_ref_down(slabman *s, lfstack *hot_slabs);
+static void slab_ref_down(slabman *s, lfstack *free_slabs);
 
 #define slab_new(as...) trace(NALLOC, 2, slab_new, as)
 #define slab_ref_down(as...) trace(NALLOC, LINREF_VERB, slab_ref_down, as)
 
-lfstack hot_slabs = LFSTACK;
+lfstack shared_free_slabs = LFSTACK;
 
 /* slabmans creates enough BSS to mandate -mcmodel=medium. I'd like to
    ignore slabs lower than &end, but gcc constant expression rules would
    forbid aligning &end or computing the size of slabmans. */
-static slab *slabs = (slab *) 0;
-/* slabman *slabmans = NULL; */
-/* static slabman slabmans[((uptr) 0 - sizeof(slab))/sizeof(slab)]; */
+static slab *slabs = (slab *) HEAP_MIN;
 static slabman slabmans[(HEAP_MAX - HEAP_MIN) / sizeof(slab)];
+
+dbg iptr slabs_allocated;
 
 dbg iptr slabs_used;
 dbg cnt bytes_used;
@@ -113,7 +112,7 @@ static const type polytypes[] = { MAP(PTYPE, _,
 };
 
 #define PHERITAGE(i, ...)                                           \
-    HERITAGE(&polytypes[i], 8, 1, new_slabs)
+    HERITAGE(&polytypes[i], 8, 2, new_slabs)
 static heritage poly_heritages[] = {
     ITERATE(PHERITAGE, _, 14)
 };
@@ -145,15 +144,9 @@ void *(linalloc)(heritage *h){
     if(!s && !(s = slab_new(h)))
         return EOOR(), NULL;
 
-    /* assert(aligned_pow2(s, SLAB_SIZE)); */
-    assert(!s->owner);
     block *b = alloc_from_slab(s, h);
-    if(slab_num_priv_blocks(s))
+    if(!slab_fully_hot(s) || !recover_hot_blocks(s))
         lfstack_push(&s->sanc, &h->slabs);
-    else{
-        s->owner = this_thread();
-        s->her = h;
-    }
 
     assert(xadd(h->t->size, &bytes_used), 1);
     
@@ -164,52 +157,63 @@ void *(linalloc)(heritage *h){
 
 static
 block *(alloc_from_slab)(slabman *s, heritage *h){
-    block *b;
-    if(s->cold_blocks){
-        b = (block *) &blocks_of(s)[h->t->size * --s->cold_blocks];
-        assert(magics_valid(b, h->t->size));
-        return b;
-    }
-    b = cof(stack_pop(&s->free_blocks), block, sanc);
-    if(b)
-        return b;
-    s->free_blocks = lfstack_pop_all(&s->wayward_blocks, 1);
-    return cof(stack_pop(&s->free_blocks), block, sanc);
+    if(s->contig_blocks)
+        return (block *) &blocks_of(s)[h->t->size * --s->contig_blocks];
+    block *b = cof(stack_pop(&s->free_blocks), block, sanc);
+    assert(b);
+    return b;
+}
+
+static
+bool slab_fully_hot(const slabman *s){
+    return !(s->contig_blocks ||
+             stack_size(&s->free_blocks));
+}
+
+static
+err (recover_hot_blocks)(slabman *s){
+    assert(!lfstack_gen(&s->hot_blocks));
+    stack p = lfstack_pop_all_or_incr(1, &s->hot_blocks);
+    if(!stack_size(&p))
+        return -1;
+    s->free_blocks = p;
+    return 0;
 }
 
 static
 slabman *(slab_new)(heritage *h){
-    slabman *s = cof(lfstack_pop(h->hot_slabs), slabman, sanc);
+    slabman *s = cof(lfstack_pop(h->free_slabs), slabman, sanc);
     if(!s){
         slab *sb = h->new_slabs(h->slab_alloc_batch);
         if(!sb)
             return NULL;
+        assert(xadd(h->slab_alloc_batch, &slabs_allocated), 1);
         assert(aligned_pow2(sb, SLAB_SIZE));
+        assert(sb >= (slab *) HEAP_MIN && sb < (slab *) HEAP_MAX);
+        
         s = slab_of((block *) sb);
-        for(slabman *si = s; si != &s[h->slab_alloc_batch]; si++){
+        *s = (slabman) SLAB;
+        for(slabman *si = s + 1; si != &s[h->slab_alloc_batch]; si++){
             *si = (slabman) SLAB;
-            if(si != s)
-                lfstack_push(&si->sanc, h->hot_slabs);
+            lfstack_push(&si->sanc, h->free_slabs);
         }
     }
     assert(xadd(1, &slabs_used) >= 0);
-    assert(!s->tx.linrefs && !s->owner);
-    assert(!s->wayward_blocks.size);
+    assert(!s->tx.linrefs);
+    assert(!lfstack_size(&s->hot_blocks));
     
     s->her = h;
     if(s->tx.t != h->t){
         s->tx = (tyx){h->t};
-        cnt mb = s->cold_blocks = slab_max_blocks(s);
+        cnt nb = s->contig_blocks = slab_max_blocks(s);
         if(h->t->lin_init)
-            for(cnt b = 0; b < mb; b++)
+            for(cnt b = 0; b < nb; b++)
                 h->t->lin_init((lineage *) &blocks_of(s)[b * h->t->size]);
         else
-            for(uint i = 0; i < s->cold_blocks; i++)
-                assert(write_magics((block *) &blocks_of(s)[i * h->t->size],
+            for(cnt b = 0; b < nb; b++)
+                assert(write_magics((block *) &blocks_of(s)[b * h->t->size],
                                     h->t->size));
     }
-    
-    s->hot_slabs = h->hot_slabs;    
     s->tx.linrefs = 1;
     return s;
 }
@@ -221,50 +225,37 @@ void (free)(void *b){
     assert(write_magics(l, slab_of(l)->tx.t->size));
     (linfree)(l);
 }
+
+static bool fills_slab(cnt blocks, size bs){
+    assert(blocks * bs <= SLAB_SIZE);
+    return blocks * bs >= SLAB_SIZE - bs;
+}
+
 void (linfree)(lineage *l){
     block *b = l;
-    slabman *s = slab_of(b);
     *b = (block){SANCHOR};
 
-    assert(s->tx.t);
+    slabman *s = slab_of(b);
     assert(xadd(-s->tx.t->size, &bytes_used));
 
-    heritage *h = s->her;
-    if(s->owner == this_thread() && h->slabs.size < h->max_slabs){
-        /* TODO: yeah, you own it till you free 1 block. Not so
-           great. More complicated scheme could ensure that it's not lost
-           if you don't push it upon first. Consider
-           lfstack_push_if(size_is,..)*/
-        s->owner = NULL;
-        dealloc_from_slab(b, s);
-        lfstack_push(&s->sanc, &h->slabs);
-    }else{
-        int nwb = lfstack_push(&b->sanc, &s->wayward_blocks);
-        if(&blocks_of(s)[s->tx.t->size * (nwb + 2)] >
-           &blocks_of(s)[MAX_BLOCK])
-        {
-            assert(!s->free_blocks.size);
-            s->cold_blocks = s->wayward_blocks.size;
-            s->wayward_blocks = (lfstack) LFSTACK;
-            slab_ref_down(s, s->hot_slabs);
+    if(lfstack_push(&b->sanc, &s->hot_blocks)){
+        lfstack hb = lfstack_pop_all_iff(0, &s->hot_blocks, 1);
+        if(!lfstack_empty(&hb)){
+            assert(stack_empty(&s->free_blocks));
+            /* TODO: a bit invasive */
+            s->free_blocks = (stack){.top=hb.top, .size=hb.size};
+            lfstack_push(&s->sanc, &s->her->slabs);
         }
     }
 }
 
 static
-void (dealloc_from_slab)(block *b, slabman *s){
-    stack_push(&b->sanc, &s->free_blocks);
-}
-
-static
-void (slab_ref_down)(slabman *s, lfstack *hot_slabs){
+void (slab_ref_down)(slabman *s, lfstack *free_slabs){
     assert(s->tx.linrefs > 0);
     assert(s->tx.t);
     if(xadd((uptr) -1, &s->tx.linrefs) == 1){
         assert(xadd(-1, &slabs_used));
-        s->owner = NULL;
-        s->her = NULL;
-        lfstack_push(&s->sanc, hot_slabs);
+        lfstack_push(&s->sanc, free_slabs);
     }
 }
 
@@ -287,7 +278,7 @@ err (linref_up)(volatile void *l, type *t){
 void (linref_down)(volatile void *l){
     T->nallocin.linrefs_held--;
     slabman *s = slab_of((void *) l);
-    slab_ref_down(s, s->hot_slabs);
+    slab_ref_down(s, s->her->free_slabs);
 }
 
 static
@@ -295,19 +286,15 @@ unsigned int slab_max_blocks(const slabman *s){
     return MAX_BLOCK / s->tx.t->size;
 }
 
-static
-cnt slab_num_priv_blocks(const slabman *s){
-    return s->free_blocks.size + s->cold_blocks;
-}
-
 static constfun 
 slabman *(slab_of)(const block *b){
+    assert(b);
     return &slabmans[cof_aligned_pow2(b, slab) - slabs];
 }
 
 static constfun 
-u8 *(blocks_of)(const slabman *b){
-    return slabs[b - slabmans].blocks;
+u8 *(blocks_of)(const slabman *s){
+    return slabs[s - slabmans].blocks;
 }
 
 void *(smalloc)(size size){
@@ -400,6 +387,10 @@ void *aligned_alloc(size align, size sz){
 }
 void *valloc(size sz){
     EWTF();
+}
+
+void nalloc_profile_report(void){
+    ppl(0, slabs_allocated, slabs_used, bytes_used);
 }
 
 #pragma GCC visibility pop

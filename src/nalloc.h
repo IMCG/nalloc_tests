@@ -11,8 +11,8 @@ typedef struct {
 typedef block lineage;
 
 typedef const struct type{
-    const char *name;
-    size size;
+    const char *const name;
+    const size size;
     checked err (*linref_up)(volatile void *l, const struct type *t);
     void (*linref_down)(volatile void *l);
     void (*lin_init)(lineage *b);
@@ -21,18 +21,21 @@ typedef const struct type{
 
 typedef struct heritage{
     lfstack slabs;
-    lfstack *hot_slabs;
+    lfstack *free_slabs;
     cnt max_slabs;
     cnt slab_alloc_batch;
-    type *t;
+    type *const t;
     struct slab *(*new_slabs)(cnt nslabs);
 } heritage;
 #define HERITAGE(t, ms, sab, ns, override...)       \
-    {LFSTACK, &hot_slabs, ms, sab, t, ns, override}
-#define KERN_HERITAGE(t) HERITAGE(t, 16, 1, new_slabs)
+    {LFSTACK, &shared_free_slabs, ms, sab, t, ns, override}
+#define KERN_HERITAGE(t) HERITAGE(t, 16, 2, new_slabs)
 #define POSIX_HERITAGE(t) KERN_HERITAGE(t)
 
-extern lfstack hot_slabs;
+extern lfstack shared_free_slabs;
+
+dbg extern iptr slabs_used;
+dbg extern cnt bytes_used;
 
 typedef void (*linit)(void *);
 
@@ -53,9 +56,6 @@ void linfree(lineage *l);
    with t.
 */
 
-dbg extern iptr slabs_used;
-dbg extern cnt bytes_used;
-
 checked err linref_up(volatile void *l, type *t);
 void linref_down(volatile void *l);
 
@@ -65,6 +65,8 @@ checked void *malloc(size size);
 void free(void *b);
 void *calloc(size nb, size bs);
 void *realloc(void *o, size size);
+
+void nalloc_profile_report(void);
 
 typedef struct{
     int baseline;
@@ -103,7 +105,7 @@ void byte_account_close(byte_account *a);
         account_expr;                                   \
     })                                                  \
 
-        
+
 #define pudef (type, "(typ){%}", a->name)
 #include <pudef.h>
 #define pudef (heritage, "(her){%, nslabs:%}", a->t, a->slabs.size)

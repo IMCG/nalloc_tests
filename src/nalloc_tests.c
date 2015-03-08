@@ -19,9 +19,9 @@
 typedef void *(entrypoint)(void *);
 
 cnt nthreads = 100;
-cnt max_allocs = 1000;
-cnt niter = 10000;
-cnt max_writes = 8;
+cnt max_allocs = 10000;
+cnt niter = 1000000;
+cnt max_writes = 0;
 cnt max_size = 128;
 bool print_profile = 0;
 
@@ -31,10 +31,6 @@ bool print_profile = 0;
 #define NSHUFFLER_LISTS 16
 
 #define MIN_SIZE (sizeof(tstblock))
-
-#define CAVG_BIAS .05
-static __thread double malloc_cavg;
-static __thread double free_cavg;
 
 struct child_args{
     int parentid;
@@ -60,12 +56,12 @@ static pthread_mutex_t state_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* To be used when compiling with a reference malloc. */
 __attribute__((__weak__))
-void *smalloc(size s){
+void *(smalloc)(size s){
     return malloc(s);
 }
 
 __attribute__((__weak__))
-void sfree(void *p, size s){
+void (sfree)(void *p, size s){
     free(p);
 }
 
@@ -77,6 +73,13 @@ void linref_account_close(linref_account *a){
 __attribute__((__weak__))
 void linref_account_open(linref_account *a){
     (void) a;
+}
+
+__attribute__((__weak__))
+void nalloc_profile_report(void){}
+
+static void profile_report(void){
+    nalloc_profile_report();
 }
 
 static void thr_setup(uint id){
@@ -154,6 +157,7 @@ static void launch_test(void *test(void *)){
     timeval start = get_time();
     for(uint i = 0; i < nthreads; i++)
         pthread_join(threads[i].id, NULL);
+    profile_report();
     ppl(0, time_diff(start));
 }
 
@@ -181,39 +185,11 @@ void check_magics(tstblock *b, uint magic){
         assert(b->magics[i] == magic);
 }
 
-void profile_init(void){
-    void *ptr;
-    if(!print_profile)
-        return;
-    malloc_cavg = TIME(ptr = malloc(42));
-    assert(ptr);
-    free(ptr);
-}
-        
-void profile_report(void){}
-
-void *wsmalloc(size s){
-    void *found;
-    if(print_profile)
-        malloc_cavg = CAVG_BIAS * TIME(found = smalloc(s))
-            + (1 - CAVG_BIAS) * malloc_cavg;
-    else
-        found = smalloc(s);
-    return found;
-}
-
-void wsfree(void *ptr, size s){
-    if(print_profile)
-        free_cavg = CAVG_BIAS * TIME(free(ptr))
-            + (1 - CAVG_BIAS) * free_cavg;
-    else
-        sfree(ptr, s);
-}
-
 void mt_child_rand(uint tid){
     thr_setup(tid);
     
     list blists[NSHUFFLER_LISTS];
+    cnt allocs = 0;
 
     for(uint i = 0; i < NSHUFFLER_LISTS; i++)
         blists[i] = (list) LIST(&blists[i], NULL);
@@ -223,16 +199,17 @@ void mt_child_rand(uint tid){
 
     for(uint i = 0; i < NOPS; i++){
         list *blocks = &blists[mod_pow2(wrand(), NSHUFFLER_LISTS)];
-        if(randpcnt((blocks->size < max_allocs/2) ? 75 :
-                    (blocks->size < max_allocs) ? 50 :
-                    (blocks->size < max_allocs * 2) ? 25 :
+        if(randpcnt(allocs < max_allocs/2 ? 75 :
+                    allocs < max_allocs ? 50 :
                     0))
         {
-            size bytes = umax(MIN_SIZE, wrand() % (max_size));
-            tstblock *b = wsmalloc(bytes);
+            /* size bytes = umax(MIN_SIZE, wrand() % (max_size)); */
+            size bytes = 64;
+            tstblock *b = smalloc(bytes);
             if(!b)
                 continue;
-            pp(b);
+            allocs++;
+            /* ppl(0, b, blocks->size); */
             *b = (tstblock) {.bytes = bytes, .lanc = LANCHOR(NULL)};
             write_magics(b, tid);
             list_enq(&b->lanc, blocks);
@@ -240,14 +217,15 @@ void mt_child_rand(uint tid){
             tstblock *b = cof(list_deq(blocks), tstblock, lanc);
             if(!b)
                 continue;
+            allocs--;
             check_magics(b, tid);
-            wsfree(b, b->bytes);
+            sfree(b, b->bytes);
         }
     }
 
     for(uint i = 0; i < NSHUFFLER_LISTS; i++)
         for(tstblock *b; (b = cof(list_deq(&blists[i]), tstblock, lanc));)
-            wsfree(b, b->bytes);
+            sfree(b, b->bytes);
 }
 
 /* void mt_sharing_child(uint tid){ */
@@ -273,7 +251,7 @@ void mt_child_rand(uint tid){
 
 /*         if(randpcnt(malloc_prob)){ */
 /*             size bytes = umax(MIN_SIZE, wrand() % (max_size)); */
-/*             b = wsmalloc(bytes); */
+/*             b = smalloc(bytes); */
 /*             if(!b) */
 /*                 continue; */
 /*             log(2, "Allocated: %", b); */
@@ -300,7 +278,7 @@ void mt_child_rand(uint tid){
 /*                 continue; */
 /*             log(2, "Freeing priv: %", b); */
 /*             check_magics(b, tid); */
-/*             wsfree(b, b->bytes); */
+/*             sfree(b, b->bytes); */
 /*             num_blocks--; */
 /*         } */
 /*     } */
@@ -333,7 +311,7 @@ void mt_child_rand(uint tid){
 /*         lfstack *blocks = &shared.block_stacks[i].s; */
 /*         tstblock *b; */
 /*         while((b = cof(lfstack_pop(blocks), tstblock, sanc))) */
-/*             wsfree(b, b->size); */
+/*             sfree(b, b->size); */
 /*     } */
 /* } */
 
@@ -354,7 +332,7 @@ void mt_child_rand(uint tid){
 
 /*         if(randpcnt(malloc_prob)){ */
 /*             cnt size = umax(MIN_SIZE, wrand() % (max_size)); */
-/*             b = wsmalloc(size); */
+/*             b = smalloc(size); */
 /*             if(!b) */
 /*                 continue; */
 /*             log(2, "Allocated: %", b); */
@@ -380,7 +358,7 @@ void mt_child_rand(uint tid){
 /*                 continue; */
 /*             log(2, "Freeing priv: %", b); */
 /*             check_magics(b, tid); */
-/*             wsfree(b, b->size); */
+/*             sfree(b, b->size); */
 /*         } */
 /*     } */
     
@@ -412,7 +390,7 @@ void mt_child_rand(uint tid){
 /*                 continue; */
 /*             log(2, "Freeing priv: %", b); */
 /*             check_magics(b, tid); */
-/*             wsfree(b, b->size); */
+/*             sfree(b, b->size); */
 /*             num_blocks--; */
 /*         } else { */
 /*             b = */
@@ -464,8 +442,6 @@ void mt_child_rand(uint tid){
 /* } */
 
 int main(int argc, char **argv){
-    profile_init();
-
     int program = 1, opt, do_malloc = 0;
     while( (opt = getopt(argc, argv, "t:a:i:p:w")) != -1 ){
         switch (opt){
