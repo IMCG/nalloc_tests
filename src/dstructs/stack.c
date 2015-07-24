@@ -62,7 +62,7 @@ sanchor *(lfstack_pop_iff)(uptr gen, uptr size, lfstack *s){
 stack (lfstack_pop_all)(cnt incr, lfstack *s){
     for(lfstack x = *s;;){
         if((!x.top && !incr)
-           || cas2_won(rup(x, .top=NULL, .gen += incr, .size=0), s, &x))
+           || cas2_won(rup(x, .top=NULL, .gen+=incr, .size=0), s, &x))
             return (stack){x.top, x.size};
     }
 }
@@ -82,7 +82,7 @@ lfstack (lfstack_pop_all_iff)(uptr newg, lfstack *s, uptr oldg){
         if(x.gen != oldg)
             return rup(x, .top=NULL);
         if((!x.top && !x.gen != oldg)
-           || cas2_won(rup(x, .top=NULL, .gen = newg, .size=0), s, &x))
+           || cas2_won(rup(x, .top=NULL, .gen=newg, .size=0), s, &x))
             return x;
     }
 }

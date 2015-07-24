@@ -1,40 +1,42 @@
 /**
- * Lockfree slab allocator that can provide type-stable memory and
- * customizably local caching of free blocks, or just do malloc.
+ * Lockfree slab allocator for type-stable memory and customizably local
+ * caching of free memory, as well as plain malloc.
  *
- * A lineage L is a block of memory s.t there's a type T s.t. if a call to
- * linref_up(&L, &T) == 0 and no corresponding call to linref_down has yet
- * been made, then:
- * - There's a heritage H s.t. only linalloc(&H) may return &L, even if
- * linfree(&L) is called.
- * - T is unqiue.
- * - No function in this file will ever write to any part of L except for
- * its sizeof(lineage)-byte header.
+ * Allocates lineages from slabs. A slab is a naturally aligned, contig
+ * set of lineages of the same size, of the same type (id). A heritage is
+ * a set of slabs of lineages of the same type. A lineage is a block of
+ * memory except its contents are defined even after it's freed. It
+ * represents all the generations of the same address that have kept the
+ * same type.
  *
- * A heritage H is a cache of lineages with associated type T s.t., if
- * linalloc(&H) == L and no call to linfree(L) has been made, then
- * linref_up(&L, &T) == 0. Also, H has a function block_init s.t. for all
- * L, block_init(L) is only called the first time that linalloc(&H)
- * returns L.
+ * You can use linref_up(l, t) to prove that block l is of type t,
+ * etc. The cool thing is that holding linrefs doesn't delay the free or
+ * reallocation of l. In practice, it delays the freeing of its slab.
  *
- * Lineages provide "type-stable" memory because, if you get a linref on a
- * lineage L, then you've associated L with a type T s.t. only calls to
- * linalloc on heritages also associated with T could return L. Combined
- * with the no-write promise, this lets you safely free and reallocate L
- * without losing guarantees about the validity of its contents, but only
- * into the limited subset of free blocks wich are associated with T.
+ * The standard functions like malloc() use global heritages of
+ * "polymorphic types" ("bullshit") of fixed sizes and no-op lin_init
+ * functions.
  *
- * malloc() and co are wrappers around linalloc and linfree, using
- * heritages keyed to "polymorphic types" of fixed sizes (bullshit) and
- * no-op block_init functions.
+ * nalloc stores slab metadata away from slabs, in a huge BSS array. This
+ * is the easiest way to make linref_up safe. Otherwise, you'd have to
+ * forbid linref_up calls on pages not controlled by nalloc (think
+ * memory-mapped files). That's not too onerous, but only if nalloc can't
+ * return pages to the kernel. It also makes bigger-than-slab-size
+ * allocations easy, and plays better with low-associativity caches by not
+ * reserving the head or foot of each page for metadata.
  *
- * TODO: some heritage_destroy function is needed. Doing nothing upon
- * thread death doesn't break anything, but it leaks the _full_ slabs in
- * all thread-local heritages.
+ * On the other hand, Linux programs like gdb can't handle a huge BSS, so
+ * I restrict the dimensions of the heap. The array scheme is probably too
+ * tough for Linux, but it wouldn't be very hard to switch back to
+ * metadata in slab headers.
  *
- * TODO!!!: blocks must be linited before linref_up can return true. Then
- * linref_up provides guarantee that the only writes that occurred in
- * nalloc.c were to the block header and via linit.
+ * TODO: slabs are actually never freed right now.
+ *
+ * TODO: local heritages need special cased code to avoid needless LOCKed
+ * instructions. 
+ *
+ * TODO: need some heritage_destroy function, otherwise you have to leak
+ * the slabs in local heritages upon thread death.
  */
 
 #define MODULE NALLOC
@@ -94,9 +96,6 @@ static void slab_ref_down(slabman *s, lfstack *free_slabs);
 
 lfstack shared_free_slabs = LFSTACK;
 
-/* slabmans creates enough BSS to mandate -mcmodel=medium. I'd like to
-   ignore slabs lower than &end, but gcc constant expression rules would
-   forbid aligning &end or computing the size of slabmans. */
 static slab *slabs = (slab *) HEAP_MIN;
 static slabman slabmans[(HEAP_MAX - HEAP_MIN) / sizeof(slab)];
 
@@ -139,7 +138,29 @@ void *(malloc)(size size){
 void *(linalloc)(heritage *h){
     if(poisoned())
         return NULL;
-    
+
+    void *b = h->owner &&  ? linalloc_local(h), linalloc_shared(h);
+    if(!b)
+        return NULL;
+
+    assert(xadd(h->t->size, &bytes_used), 1);
+    assert(b);
+    assert(aligned_pow2(b, sizeof(dptr)));
+}
+
+void *(linalloc_local)(heritage *h){
+    slabman *s = cof(stack_peek(&h->slabs), slabman, sanc);
+    if(!s && !(s = slab_new(h)))
+        return EOOR(), NULL;
+
+    block *b = alloc_from_slab(s, h);
+    if(slab_fully_hot(s) && recover_hot_blocks(s))
+        if(s != cof(stack_pop(&s->sanc, &h->slabs), slabman, sanc))
+            EWTF();
+    return b;
+}
+
+void *(linalloc_shared)(heritage *h){
     slabman *s = cof(lfstack_pop(&h->slabs), slabman, sanc);
     if(!s && !(s = slab_new(h)))
         return EOOR(), NULL;
@@ -147,11 +168,7 @@ void *(linalloc)(heritage *h){
     block *b = alloc_from_slab(s, h);
     if(!slab_fully_hot(s) || !recover_hot_blocks(s))
         lfstack_push(&s->sanc, &h->slabs);
-
-    assert(xadd(h->t->size, &bytes_used), 1);
     
-    assert(b);
-    assert(aligned_pow2(b, sizeof(dptr)));
     return b;
 }
 

@@ -26,8 +26,8 @@ align(sizeof(dptr))
 typedef volatile struct lfstack{
     sanchor *top;
     struct{
-        uptr gen:WORDBITS/2;
         uptr size:WORDBITS/2;
+        uptr gen:WORDBITS/2;
     };
 } lfstack;
 #define LFSTACK {}
