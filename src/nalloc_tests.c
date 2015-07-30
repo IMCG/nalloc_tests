@@ -54,7 +54,7 @@ static sem_t unpauses;
 static sem_t pauses;
 static pthread_mutex_t state_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* To be used when compiling with a reference malloc. */
+/* Fall back to system malloc when compiling without nalloc.o for reference tests. */
 __attribute__((__weak__))
 void *(smalloc)(size s){
     return malloc(s);
@@ -442,8 +442,9 @@ void mt_child_rand(uint tid){
 /* } */
 
 int main(int argc, char **argv){
-    int program = 1, opt, do_malloc = 0;
-    while( (opt = getopt(argc, argv, "t:a:i:p:w")) != -1 ){
+    int program = 1, opt;
+    
+    while( (opt = getopt(argc, argv, "t:a:i:w:p:")) != -1 ){
         switch (opt){
         case 't':
             nthreads = atoi(optarg);
@@ -462,7 +463,6 @@ int main(int argc, char **argv){
             break;
         }
     }
-
 
     switch(program){
     case 1:

@@ -358,7 +358,7 @@ void *valloc(size sz){
 }
 
 void nalloc_profile_report(void){
-    ppl(0, slabs_allocated, slabs_used, bytes_used);
+    ppl(0, slabs_allocated, slabs_used, bytes_used, lfstack_size(&shared_free_slabs));
 }
 
 #pragma GCC visibility pop

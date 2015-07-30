@@ -58,8 +58,6 @@ typedef struct align(SLAB_SIZE) slab{
                lfstack_size(&a->hot_blocks))
 #include <pudef.h>
 
-extern lfstack shared_free_slabs;
-
 dbg extern iptr slabs_used;
 dbg extern cnt bytes_used;
 
