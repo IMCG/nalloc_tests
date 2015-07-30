@@ -3,8 +3,6 @@
 #include <list.h>
 #include <stack.h>
 
-#define MAX_BLOCK SLAB_SIZE
-
 typedef struct {
     sanchor sanc;
 } block;
@@ -22,7 +20,6 @@ typedef const struct type{
 typedef struct heritage{
     lfstack slabs;
     lfstack *free_slabs;
-    tid owner;
     cnt max_slabs;
     cnt slab_alloc_batch;
     type *const t;
@@ -32,6 +29,34 @@ typedef struct heritage{
     {LFSTACK, &shared_free_slabs, ms, sab, t, ns, override}
 #define KERN_HERITAGE(t) HERITAGE(t, 16, 2, new_slabs)
 #define POSIX_HERITAGE(t) KERN_HERITAGE(t)
+
+typedef struct tyx tyx;
+
+typedef volatile struct slabfooter{
+    sanchor sanc;
+    stack free_blocks;
+    cnt contig_blocks;
+    heritage *volatile her;
+    volatile struct align(sizeof(dptr)) tyx {
+        type *t;
+        iptr linrefs;
+    } tx;
+    lfstack hot_blocks;
+} slabfooter;
+
+#define MAX_BLOCK (SLAB_SIZE - sizeof(slabfooter))
+
+typedef struct align(SLAB_SIZE) slab{
+    u8 blocks[MAX_BLOCK];
+    slabfooter;
+} slab;
+
+#define SLAB {.free_blocks = STACK, .hot_blocks = LFSTACK}
+#define pudef (slab, "(slab){%, refs:%, contig:%, free:%, hot:%}",   \
+               a->tx.t, a->tx.linrefs, a->contig_blocks,                \
+               stack_size(&a->free_blocks),                             \
+               lfstack_size(&a->hot_blocks))
+#include <pudef.h>
 
 extern lfstack shared_free_slabs;
 

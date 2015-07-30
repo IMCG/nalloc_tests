@@ -80,9 +80,8 @@ stack lfstack_pop_all_or_incr(cnt incr, lfstack *s){
 lfstack (lfstack_pop_all_iff)(uptr newg, lfstack *s, uptr oldg){
     for(lfstack x = *s;;){
         if(x.gen != oldg)
-            return rup(x, .top=NULL);
-        if((!x.top && !x.gen != oldg)
-           || cas2_won(rup(x, .top=NULL, .gen=newg, .size=0), s, &x))
+            return x;
+        if(cas2_won(rup(x, .top=NULL, .gen=newg, .size=0), s, &x))
             return x;
     }
 }
