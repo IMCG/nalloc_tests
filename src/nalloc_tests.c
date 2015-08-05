@@ -1,24 +1,13 @@
 #define MODULE NALLOCTESTSM
 
 #include <list.h>
-#include <pthread.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/wait.h>
-#include <sys/mman.h>
 #include <nalloc.h>
 #include <stdlib.h>
-#include <time.h>
-#include <atomics.h>
 #include <unistd.h>
+#include <atomics.h>
 #include <wrand.h>
-#include <asm.h>
-#include <timing.h>
-#include <semaphore.h>
+#include <test_framework.h>
 
-typedef void *(entrypoint)(void *);
-
-cnt nthreads = 100;
 cnt max_allocs = 10000;
 cnt niter = 1000000;
 cnt max_writes = 0;
@@ -32,27 +21,6 @@ bool print_profile = 0;
 
 #define MIN_SIZE (sizeof(tstblock))
 
-struct child_args{
-    int parentid;
-    struct {
-        align(CACHELINE_SIZE)
-        lfstack s;
-    } block_stacks[NSHARED_POOLS];
-};
-
-/* GDB starts counting threads at 1, so the first child is 2. Urgh. */
-const uptr firstborn = 2;
-
-static sem_t world_rdy;
-static sem_t kid_rdy;
-
-static volatile struct tctxt{
-    pthread_t id;
-    bool dead;
-} *threads;
-static sem_t unpauses;
-static sem_t pauses;
-static pthread_mutex_t state_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Fall back to system malloc when compiling without nalloc.o for reference tests. */
 __attribute__((__weak__))
@@ -78,87 +46,8 @@ void linref_account_open(linref_account *a){
 __attribute__((__weak__))
 void nalloc_profile_report(void){}
 
-static void profile_report(void){
+void profile_report(void){
     nalloc_profile_report();
-}
-
-static void thr_setup(uint id){
-    set_dbg_id(id);
-    wsrand(TIME());
-    muste(pthread_mutex_lock(&state_lock));
-    threads[id - firstborn] = (struct tctxt) {pthread_self()};
-    muste(pthread_mutex_unlock(&state_lock));
-}
-
-static void thr_destroy(uint id){
-    muste(pthread_mutex_lock(&state_lock));
-    threads[id - firstborn].dead = true;
-    muste(pthread_mutex_unlock(&state_lock));    
-}
-
-uptr waiters;
-err pause_universe(void){
-    assert(waiters < nthreads);
-    if(!cas_won(1, &waiters, (iptr[]){0}))
-        return -1;
-    muste(pthread_mutex_lock(&state_lock));
-    cnt live = 0;
-    for(volatile struct tctxt *c = &threads[0]; c != &threads[nthreads]; c++)
-        if(!c->dead && c->id != pthread_self()){
-            live++;
-            pthread_kill(c->id, SIGUSR1);
-        }
-    waiters += live;
-    muste(pthread_mutex_unlock(&state_lock));
-    for(uint i = 0; i < live; i++)
-        muste(sem_wait(&pauses));
-    return 0;
-}
-
-void resume_universe(void){
-    cnt live = 0;
-    for(volatile struct tctxt *c = &threads[0]; c != &threads[nthreads]; c++)
-        if(!c->dead && c->id != pthread_self())
-            live++;
-    assert(live == waiters - 1);
-    for(cnt i = 0; i < live; i++)
-        muste(sem_post(&unpauses));
-    xadd(-1, &waiters);
-}
-
-void wait_for_universe(){
-    muste(sem_post(&pauses));
-    muste(sem_wait(&unpauses));
-    xadd(-1, &waiters);
-}
-
-static void launch_test(void *test(void *)){
-    muste(sem_init(&pauses, 0, 0));
-    muste(sem_init(&unpauses, 0, 0));
-    muste(sem_init(&world_rdy, 0, 0));
-    muste(sem_init(&kid_rdy, 0, 0));
-    muste(sigaction(SIGUSR1,
-                    &(struct sigaction){.sa_handler=wait_for_universe,
-                            .sa_flags=SA_RESTART | SA_NODEFER}, NULL));
-
-    struct tctxt threadscope[nthreads];
-    memset(threadscope, 0, sizeof(threadscope));
-    threads = threadscope;
-    for(uint i = 0; i < nthreads; i++)
-        if(pthread_create((pthread_t *) &threads[i].id, NULL,
-                          (void *(*)(void*))test,
-                          (void *) (firstborn + i)))
-            EWTF();
-    for(uint i = 0; i < nthreads; i++)
-        sem_wait(&kid_rdy);
-    for(uint i = 0; i < nthreads; i++)
-        sem_post(&world_rdy);
-
-    timeval start = get_time();
-    for(uint i = 0; i < nthreads; i++)
-        pthread_join(threads[i].id, NULL);
-    profile_report();
-    ppl(0, time_diff(start));
 }
 
 typedef struct{
@@ -194,8 +83,7 @@ void mt_child_rand(uint tid){
     for(uint i = 0; i < NSHUFFLER_LISTS; i++)
         blists[i] = (list) LIST(&blists[i], NULL);
 
-    sem_post(&kid_rdy);
-    sem_wait(&world_rdy);
+    thr_sync();
 
     for(uint i = 0; i < NOPS; i++){
         list *blocks = &blists[mod_pow2(wrand(), NSHUFFLER_LISTS)];
@@ -441,9 +329,18 @@ void mt_child_rand(uint tid){
 /*             EWTF("Failed to fork."); */
 /* } */
 
+#define _MODULE HI
+#define E__HI 1, 1, 1,
+
+#define LOOKUP_ _LOOKUP(CONCAT(E_, _MODULE))
+#define _LOOKUP_(mod) CONCAT2(_LOOKUP, NUM_ARGS(mod))(mod)
+#define _LOOKUP1_(mod) 0
+#define _LOOKUP3_(a, b, c) 1
+
+
 int main(int argc, char **argv){
     int program = 1, opt;
-    
+
     while( (opt = getopt(argc, argv, "t:a:i:w:p:")) != -1 ){
         switch (opt){
         case 't':

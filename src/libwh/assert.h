@@ -5,9 +5,13 @@
              (!(expr) ? TODO("Failed assertion: %.", #expr), 1 : 1), \
              0 ? expr : 0)
 
+#define assertl(req_dbg_lvl, expr...)                                \
+    ass_cond(req_dbg_lvl, E_DBG_LVL,                                 \
+             (!(expr) ? TODO("Failed assertion: %.", #expr), 1 : 1), \
+             0 ? expr : 0)
+
 #define ass_cond(req, verb, e, or...)               \
     CONCAT(ass_cond, CONCAT2(verb, req)) (e, or)
-
 
 #define ass_cond00(e, or...) e
 #define ass_cond01(e, or...) or

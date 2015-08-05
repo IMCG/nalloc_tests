@@ -47,7 +47,6 @@
    debugging. */
 #pragma GCC visibility push(hidden)
 
-#define HEAP_DBG 0
 #define LINREF_ACCOUNT_DBG 1
 #define NALLOC_MAGIC_INT 0x01FA110C
 #define LINREF_VERB 2
@@ -100,7 +99,7 @@ void *(malloc)(size size){
         return TODO(), NULL;
     block *b = (linalloc)(poly_heritage_of(size));
     if(b)
-        assert(magics_valid(b, poly_heritage_of(size)->t->size));
+        assertl(2, magics_valid(b, poly_heritage_of(size)->t->size));
     return b;
 }
 
@@ -179,8 +178,8 @@ slab *(slab_new)(heritage *h){
                 h->t->lin_init((lineage *) &blocks_of(s)[b * h->t->size]);
         else
             for(cnt b = 0; b < nb; b++)
-                assert(write_magics((block *) &blocks_of(s)[b * h->t->size],
-                                    h->t->size));
+                assertl(2, write_magics((block *) &blocks_of(s)[b * h->t->size],
+                                        h->t->size));
     }
     s->tx.linrefs = 1;
     return s;
@@ -190,7 +189,7 @@ void (free)(void *b){
     lineage *l = (lineage *) b;
     if(!b)
         return;
-    assert(write_magics(l, slab_of(l)->tx.t->size));
+    assertl(2, write_magics(l, slab_of(l)->tx.t->size));
     (linfree)(l);
 }
 
@@ -291,8 +290,6 @@ void *(realloc)(void *o, size size){
 
 static
 int write_magics(block *b, size bytes){
-    if(!HEAP_DBG)
-        return 1;
     int *magics = (int *) (b + 1);
     for(size i = 0; i < (bytes - sizeof(*b))/sizeof(*magics); i++)
         magics[i] = NALLOC_MAGIC_INT;
@@ -301,8 +298,6 @@ int write_magics(block *b, size bytes){
 
 static
 int magics_valid(block *b, size bytes){
-    if(!HEAP_DBG)
-        return 1;
     int *magics = (int *) (b + 1);
     for(size i = 0; i < (bytes - sizeof(*b))/sizeof(*magics); i++)
         assert(magics[i] == NALLOC_MAGIC_INT);

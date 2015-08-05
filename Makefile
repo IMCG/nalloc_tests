@@ -11,8 +11,6 @@ OBJS:=$(subst $(SRCD),$(OBJD),$(patsubst %.c,%.o,$(patsubst %.S,%.o,$(SRCS))))
 DIRS:=$(shell echo $(dir $(OBJS)) | tr ' ' '\n' | sort -u | tr '\n' ' ')
 CFLAGS:=$(INC)\
 	-Og \
-	-flto \
-	-fuse-linker-plugin\
 	-mcmodel=medium\
 	-g\
 	-D_GNU_SOURCE\
