@@ -348,7 +348,7 @@ int main(int argc, char **argv){
             break;
         case 'a':
             max_allocs = atoi(optarg);
-            break;
+             break;
         case 'i':
             niter = atoi(optarg);
             break;
