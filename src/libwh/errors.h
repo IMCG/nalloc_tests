@@ -2,7 +2,6 @@
 #include <pumacros.h>
 #include <runtime.h>
 #include <errverbs.h>
-#include <assert.h>
 
 /* Default break, print, and dbg levels. */
 
