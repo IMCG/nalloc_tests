@@ -59,6 +59,10 @@ void *heap_end(){
     return (void *) 0x0101010101010101;
 }
 
+void rdtsc(){
+    TODO();
+}
+
 #include <stdio.h>
 inline
 void breakpoint(void){
