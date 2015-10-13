@@ -1,7 +1,5 @@
 #pragma once
 
-#include <peb_util.h>
-
 uptr _xadd(iptr s, volatile uptr *p);
 uptr _xchg(uptr s, volatile uptr *p);
 dptr _xchg2(dptr s, volatile dptr *p);
