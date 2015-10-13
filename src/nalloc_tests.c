@@ -2,9 +2,7 @@
 
 #include <list.h>
 #include <nalloc.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <atomics.h>
 #include <wrand.h>
 #include <test_framework.h>
 
@@ -62,7 +60,7 @@ typedef struct{
 
 void write_magics(tstblock *b, uint magic){
     cnt nmagics = div_pow2(b->bytes - sizeof(*b), sizeof(b->magics[0]));
-    for(idx i = b->write_start = nmagics ? (uint) wrand() % nmagics : 0;
+    for(idx i = b->write_start = nmagics ? (uint) rand() % nmagics : 0;
         i < umin(max_writes, nmagics); i++)
         b->magics[i] = magic;
 }
@@ -86,12 +84,12 @@ void mt_child_rand(uint tid){
     thr_sync();
 
     for(uint i = 0; i < NOPS; i++){
-        list *blocks = &blists[mod_pow2(wrand(), NSHUFFLER_LISTS)];
+        list *blocks = &blists[mod_pow2(rand(), NSHUFFLER_LISTS)];
         if(randpcnt(allocs < max_allocs/2 ? 75 :
                     allocs < max_allocs ? 50 :
                     0))
         {
-            /* size bytes = umax(MIN_SIZE, wrand() % (max_size)); */
+            /* size bytes = umax(MIN_SIZE, rand() % (max_size)); */
             size bytes = 64;
             tstblock *b = smalloc(bytes);
             if(!b)
@@ -129,8 +127,8 @@ void mt_child_rand(uint tid){
 /*     uint num_blocks = 0; */
 /*     for(uint i = 0; i < NOPS; i++){ */
 /*         int size; */
-/*         lfstack *shared = &shared->block_stacks[wrand() % NSHARED_POOLS].s; */
-/*         list *priv = &priv_blocks[wrand()  */
+/*         lfstack *shared = &shared->block_stacks[rand() % NSHARED_POOLS].s; */
+/*         list *priv = &priv_blocks[rand()  */
 /*         int malloc_prob = */
 /*             num_blocks < max_allocs/2 ? 75 : */
 /*             num_blocks < max_allocs ? 50 : */
@@ -138,7 +136,7 @@ void mt_child_rand(uint tid){
 /*             0; */
 
 /*         if(randpcnt(malloc_prob)){ */
-/*             size bytes = umax(MIN_SIZE, wrand() % (max_size)); */
+/*             size bytes = umax(MIN_SIZE, rand() % (max_size)); */
 /*             b = smalloc(bytes); */
 /*             if(!b) */
 /*                 continue; */
@@ -156,11 +154,11 @@ void mt_child_rand(uint tid){
 /*             log(2, "Claiming: %", b); */
 /*             write_magics(b, tid); */
 /*             b->lanc = (lanchor) LANCHOR(NULL); */
-/*             list_enq(&b->lanc, &priv_blocks[wrand() % NSHUFFLER_LISTS]); */
+/*             list_enq(&b->lanc, &priv_blocks[rand() % NSHUFFLER_LISTS]); */
 /*         } */
 
 /*         if(randpcnt(2 * (100 - malloc_prob))){ */
-/*             b = cof(list_deq(&priv_blocks[wrand() % NSHUFFLER_LISTS]), */
+/*             b = cof(list_deq(&priv_blocks[rand() % NSHUFFLER_LISTS]), */
 /*                             tstblock, lanc); */
 /*             if(!b) */
 /*                 continue; */
@@ -211,7 +209,7 @@ void mt_child_rand(uint tid){
 /*     tstblock *b; */
 /*     uint num_blocks = 0; */
 /*     for(uint i = 0; i < NOPS; i++){ */
-/*         lfstack *shared= &shared->block_stacks[wrand() % NSHARED_POOLS].s; */
+/*         lfstack *shared= &shared->block_stacks[rand() % NSHARED_POOLS].s; */
 /*         int malloc_prob = */
 /*             num_blocks < nthreads * max_allocs/2 ? 90 : */
 /*             num_blocks < nthreads * max_allocs ? 70 : */
@@ -219,7 +217,7 @@ void mt_child_rand(uint tid){
 /*             0; */
 
 /*         if(randpcnt(malloc_prob)){ */
-/*             cnt size = umax(MIN_SIZE, wrand() % (max_size)); */
+/*             cnt size = umax(MIN_SIZE, rand() % (max_size)); */
 /*             b = smalloc(size); */
 /*             if(!b) */
 /*                 continue; */
@@ -264,7 +262,7 @@ void mt_child_rand(uint tid){
 /*     stack priv_blocks = STACK; */
 /*     uint num_blocks = 0; */
 /*     for(uint i = 0; i < NOPS; i++){ */
-/*         lfstack *blocks= &shared->block_stacks[wrand() % NSHARED_POOLS].s; */
+/*         lfstack *blocks= &shared->block_stacks[rand() % NSHARED_POOLS].s; */
 /*         int free_prob =  */
 /*             num_blocks < max_allocs/2 ? 25 : */
 /*             num_blocks < max_allocs ? 50 : */

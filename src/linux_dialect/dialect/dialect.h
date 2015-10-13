@@ -33,6 +33,8 @@
 #include <syscall.h>
 
 #include <atomics.h>
+
+#include <runtime_config.h>    
 #include <stdlib.h>
 
 #endif

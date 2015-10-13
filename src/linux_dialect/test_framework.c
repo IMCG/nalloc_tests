@@ -24,7 +24,7 @@ static pthread_mutex_t thrgrp_state = PTHREAD_MUTEX_INITIALIZER;
 
 void thr_setup(uint id){
     set_dbg_id(id);
-    wsrand(TIME());
+    srand(TIME());
     muste(pthread_mutex_lock(&thrgrp_state));
     threads[id - firstborn] = (struct tctxt) {pthread_self()};
     muste(pthread_mutex_unlock(&thrgrp_state));
