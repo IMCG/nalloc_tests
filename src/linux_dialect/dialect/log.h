@@ -33,10 +33,9 @@
 #define log_cond(lvl, module, e, or...)                             \
     CONCAT(log_cond, CONCAT2(CONCAT3(LOG_, module), lvl) ) (e, or)
 
-/* The point of this is to cut down on compilation time by pruning dead
-   branches in the prepocessor. Consider the alternative of generating
-   complicated _Generic() expressions that'll have to propogate to some
-   DCE phase. */
+/* The point of this is to cut down on compilation time. Consider the
+   alternative of generating complicated _Generic() expressions that'll
+   have to propogate to some DCE phase. */
 #define log_cond00(e, or...) e
 #define log_cond01(e, or...) or
 #define log_cond02(e, or...) or

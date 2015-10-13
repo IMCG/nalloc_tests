@@ -5,7 +5,8 @@ static rand_info epool;
 
 void rand_add_entropy(uint e){
     /* TODO: synchronization. Should be ok as is, but think. */
-    T->randin.seed ^= epool.seed ^= e;
+    T->randin.seed ^= e;
+    epool.seed ^= e;
     T->randin.last_update = epool.last_update = rdtsc();
 }
 
@@ -17,14 +18,6 @@ void rand_update_local_seed(void){
 }
 
 bool randpcnt(uint pcnt){
-    return pcnt && ((uint) wrand() % 100 < pcnt);
-}
-
-void wsrand(uint seed){
-    T->randin.seed = seed;
-}
-
-uint wrand(void){
-    return rand_r(&T->randin.seed);
+    return pcnt && ((uint) rand() % 100 < pcnt);
 }
 

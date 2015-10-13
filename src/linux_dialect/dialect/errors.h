@@ -1,6 +1,6 @@
 #pragma once
-#include <pumacros.h>
-#include <runtime.h>
+#include <dial_macros.h>
+#include <config.h>
 #include <errverbs.h>
 
 /* Default break, print, and dbg levels. */
@@ -29,10 +29,6 @@
 #define E_DBG_LVL FIRST(LOOKUP)
 #define E_BREAK_LVL SECOND(LOOKUP)
 #define E_PRINT_LVL THIRD(LOOKUP)
-
-#ifdef assert
-#undef assert
-#endif
 
 extern noreturn void panic(const char *, ...);
 
@@ -129,7 +125,7 @@ extern noreturn void panic(const char *, ...);
     /* "Unreadable or unwriteable memory: %.", (void *) addr    */
 
 #define err_cond(req, verb, e, or...)                   \
-    CONCAT(err_cond, CONCAT2(verb, req)) (e, or)
+    CONCAT(log_cond, CONCAT2(verb, req)) (e, or)
 
 #define err_cond00(e, or...) e
 #define err_cond01(e, or...) or

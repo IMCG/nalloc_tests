@@ -16,7 +16,10 @@ typedef ptrdiff_t ptrdiff;
 typedef enum{
     EOK = 0,
     EARG = -1,
-    EOOR = -2
+    EOOR = -2,
+    
+    EMAX = EOK,
+    EMIN = EOOR,
 } err;
 typedef int ecnt;
 

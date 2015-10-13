@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pumacros.h>
+#include <dial_macros.h>
 
 #include <inttypes.h>
 #include <stdarg.h>

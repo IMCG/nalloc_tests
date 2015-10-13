@@ -8,6 +8,7 @@
 #define constfun __attribute__((const))
 #define noreturn __attribute__((noreturn))
 #define packed __attribute__((packed))
+#define flat __attribute__((flatten))
 #define align(ment) __attribute__((__aligned__(ment)))
 #define aliasing __attribute__((may_alias))
 #define checked __attribute__((warn_unused_result))
@@ -20,16 +21,18 @@
 #include <string.h>
 #include <stdio.h>
 #include <pustr.h>
+
+#include <assert.h>
+#include <config.h>
 #include <log.h>
+
 #include <errors.h>
-
-#include <runtime.h>
-
-#include <peb_util.h>
+#include <dial_util.h>
 #include <wrand.h>
 
 #include <syscall.h>
 
+#include <atomics.h>
 #include <stdlib.h>
 
 #endif
