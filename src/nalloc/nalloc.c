@@ -40,7 +40,6 @@
 #include <stack.h>
 #include <list.h>
 #include <nalloc.h>
-#include <atomics.h>
 #include <thread.h>
 
 /* Prevents system library functions from using nalloc. Useful for
@@ -133,8 +132,7 @@ block *(alloc_from_slab)(slab *s, heritage *h){
 
 static
 bool slab_fully_hot(const slab *s){
-    return !(s->contig_blocks ||
-             stack_size(&s->free_blocks));
+    return !s->contig_blocks && stack_empty(&s->free_blocks);
 }
 
 static
@@ -156,7 +154,6 @@ slab *(slab_new)(heritage *h){
             return NULL;
         assert(xadd(h->slab_alloc_batch, &slabs_allocated), 1);
         assert(aligned_pow2(s, SLAB_SIZE));
-        assert(s >= (slab *) HEAP_START && s < (slab *) HEAP_END);
         
         *s = (slab) SLAB;
         for(slab *si = s + 1; si != &s[h->slab_alloc_batch]; si++){
@@ -166,7 +163,7 @@ slab *(slab_new)(heritage *h){
     }
     assert(xadd(1, &slabs_used) >= 0);
     assert(!s->tx.linrefs);
-    assert(!lfstack_size(&s->hot_blocks));
+    /* assert(!lfstack_size(&s->hot_blocks)); */
     
     s->her = h;
     if(s->tx.t != h->t){
@@ -209,8 +206,8 @@ void (linfree)(lineage *l){
         lfstack hb = lfstack_pop_all_iff(0, &s->hot_blocks, 1);
         if(lfstack_gen(&hb) == 1 && !lfstack_empty(&hb)){
             assert(stack_empty(&s->free_blocks));
-            /* TODO: a bit invasive */
-            s->free_blocks = (stack){.top=hb.top, .size=hb.size};
+            /* TODO: a bit invasive. And size is now out of sync */
+            s->free_blocks = (stack){.top=hb.top, .size=0};
             lfstack_push(&s->sanc, &s->her->slabs);
         }
     }
@@ -352,8 +349,10 @@ void *valloc(size sz){
     EWTF();
 }
 
+/* TODO: keep track of size */
 void nalloc_profile_report(void){
-    ppl(0, slabs_allocated, slabs_used, bytes_used, lfstack_size(&shared_free_slabs));
+    /* ppl(0, slabs_allocated, slabs_used, bytes_used, lfstack_size(&shared_free_slabs)); */
+    ppl(0, slabs_allocated, slabs_used, bytes_used);
 }
 
 #pragma GCC visibility pop

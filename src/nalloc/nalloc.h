@@ -22,7 +22,7 @@ typedef struct heritage{
     lfstack *free_slabs;
     cnt max_slabs;
     cnt slab_alloc_batch;
-    type *const t;
+    type *t;
     struct slab *(*new_slabs)(cnt nslabs);
 } heritage;
 #define HERITAGE(t, ms, sab, ns, override...)       \
@@ -52,11 +52,14 @@ typedef struct align(SLAB_SIZE) slab{
 } slab;
 
 #define SLAB {.free_blocks = STACK, .hot_blocks = LFSTACK}
-#define pudef (slab, "(slab){%, refs:%, contig:%, free:%, hot:%}",   \
-               a->tx.t, a->tx.linrefs, a->contig_blocks,                \
-               stack_size(&a->free_blocks),                             \
-               lfstack_size(&a->hot_blocks))
-#include <pudef.h>
+/* TODO */
+/* #define pudef (slab, "(slab){%, refs:%, contig:%, free:%, hot:%}",   \ */
+/*                a->tx.t, a->tx.linrefs, a->contig_blocks,                \ */
+/*                stack_size(&a->free_blocks),                             \ */
+/*                lfstack_size(&a->hot_blocks)) */
+/* #include <pudef.h> */
+
+extern lfstack shared_free_slabs;
 
 dbg extern iptr slabs_used;
 dbg extern cnt bytes_used;
@@ -139,8 +142,12 @@ void byte_account_close(byte_account *a);
 
 #define pudef (type, "(typ){%}", a->name)
 #include <pudef.h>
-#define pudef (heritage, "(her){%, nslabs:%}", a->t, a->slabs.size)
-#include <pudef.h>
+/* TODO */
+/* #define pudef (heritage, "(her){%, nslabs:%}", a->t, a->slabs.size) */
+/* #include <pudef.h> */
+
+#undef LOG_NALLOC
+#define LOG_NALLOC 0
 
 #define smalloc(as...) trace(NALLOC, 1, smalloc, as)
 #define sfree(as...) trace(NALLOC, 1, sfree, as)
