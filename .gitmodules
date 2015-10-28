@@ -1,0 +1,3 @@
+[submodule "src/nalloc"]
+	path = src/nalloc
+	url = ./src/nalloc

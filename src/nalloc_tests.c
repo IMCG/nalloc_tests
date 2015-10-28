@@ -73,8 +73,6 @@ void check_magics(tstblock *b, uint magic){
 }
 
 void mt_child_rand(uint tid){
-    thr_setup(tid);
-    
     list blists[NSHUFFLER_LISTS];
     cnt allocs = 0;
 
@@ -327,15 +325,6 @@ void mt_child_rand(uint tid){
 /*             EWTF("Failed to fork."); */
 /* } */
 
-#define _MODULE HI
-#define E__HI 1, 1, 1,
-
-#define LOOKUP_ _LOOKUP(CONCAT(E_, _MODULE))
-#define _LOOKUP_(mod) CONCAT2(_LOOKUP, NUM_ARGS(mod))(mod)
-#define _LOOKUP1_(mod) 0
-#define _LOOKUP3_(a, b, c) 1
-
-
 int main(int argc, char **argv){
     int program = 1, opt;
 
@@ -361,7 +350,7 @@ int main(int argc, char **argv){
 
     switch(program){
     case 1:
-        launch_test((void *(*)(void*))mt_child_rand);
+        launch_test((void *(*)(void*))mt_child_rand, "mt_child_rand");
         break;
     }
 
