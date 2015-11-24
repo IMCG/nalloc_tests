@@ -7,10 +7,11 @@
 #include <test_framework.h>
 
 cnt max_allocs = 10000;
-cnt niter = 1000000;
+cnt niter = 10000000;
 cnt max_writes = 0;
 cnt max_size = 128;
 bool print_profile = 0;
+int program;
 
 #define NOPS (niter / nthreads)
 
@@ -55,31 +56,31 @@ typedef struct{
     };
     size bytes;
     idx write_start;
-    uint magics[];
+    uptr magics[];
 } tstblock;
 
 void write_magics(tstblock *b, uint magic){
-    cnt nmagics = div_pow2(b->bytes - sizeof(*b), sizeof(b->magics[0]));
-    for(idx i = b->write_start = nmagics ? (uint) rand() % nmagics : 0;
-        i < umin(max_writes, nmagics); i++)
+    idx max = umin(div_pow2(b->bytes - sizeof(*b), sizeof(b->magics[0])),
+                   max_writes);
+    for(idx i = b->write_start = max ? rand() % max : 0; i < max; i++)
         b->magics[i] = magic;
 }
 
 void check_magics(tstblock *b, uint magic){
     size max = umin(div_pow2(b->bytes - sizeof(*b), sizeof(b->magics[0])),
                     max_writes);
-    for(uint i = b->write_start; i < max; i++)
+    for(idx i = b->write_start; i < max; i++)
         assert(b->magics[i] == magic);
 }
 
-void mt_child_rand(uint tid){
+void private_pools_test(uint tid){
     list blists[NSHUFFLER_LISTS];
     cnt allocs = 0;
 
     for(uint i = 0; i < NSHUFFLER_LISTS; i++)
         blists[i] = (list) LIST(&blists[i], NULL);
 
-    thr_sync();
+    thr_sync(start_timing);
 
     for(uint i = 0; i < NOPS; i++){
         list *blocks = &blists[mod_pow2(rand(), NSHUFFLER_LISTS)];
@@ -87,13 +88,11 @@ void mt_child_rand(uint tid){
                     allocs < max_allocs ? 50 :
                     0))
         {
-            /* size bytes = umax(MIN_SIZE, rand() % (max_size)); */
-            size bytes = 64;
+            size bytes = umax(MIN_SIZE, rand() % (max_size));
             tstblock *b = smalloc(bytes);
             if(!b)
                 continue;
             allocs++;
-            /* ppl(0, b, blocks->size); */
             *b = (tstblock) {.bytes = bytes, .lanc = LANCHOR(NULL)};
             write_magics(b, tid);
             list_enq(&b->lanc, blocks);
@@ -110,6 +109,41 @@ void mt_child_rand(uint tid){
     for(uint i = 0; i < NSHUFFLER_LISTS; i++)
         for(tstblock *b; (b = cof(list_deq(&blists[i]), tstblock, lanc));)
             sfree(b, b->bytes);
+
+    thr_sync(stop_timing);
+}
+
+void shared_pools_test(uint tid){
+    static lfstack shared[NSHARED_POOLS] = {[0 ... NSHARED_POOLS - 1] = LFSTACK};
+    cnt allocs = 0;
+
+    thr_sync(start_timing);
+
+    for(uint i = 0; i < NOPS; i++){
+        lfstack *s = &shared[mod_pow2(rand(), NSHARED_POOLS)];
+        if(randpcnt(allocs < max_allocs/2 ? 75 :
+                    allocs < max_allocs ? 50 :
+                    0))
+        {
+            size bytes = umax(MIN_SIZE, rand() % (max_size));
+            tstblock *b = smalloc(bytes);
+            if(!b)
+                continue;
+            allocs++;
+            *b = (tstblock) {.bytes = bytes, .lanc = LANCHOR(NULL)};
+            write_magics(b, (uptr) b);
+            lfstack_push(&b->sanc, s);
+        }else{
+            tstblock *b = cof(lfstack_pop(s), tstblock, lanc);
+            if(!b)
+                continue;
+            allocs--;
+            check_magics(b, (uptr) b);
+            sfree(b, b->bytes);
+        }
+    }
+
+    thr_sync(stop_timing);
 }
 
 /* void mt_sharing_child(uint tid){ */
@@ -325,8 +359,13 @@ void mt_child_rand(uint tid){
 /*             EWTF("Failed to fork."); */
 /* } */
 
+static void launch_nalloc_test(void *test, const char *name){
+    launch_test(test, name);
+    nalloc_profile_report();
+}
+
 int main(int argc, char **argv){
-    int program = 1, opt;
+    int opt;
 
     while( (opt = getopt(argc, argv, "t:a:i:w:p:")) != -1 ){
         switch (opt){
@@ -349,8 +388,11 @@ int main(int argc, char **argv){
     }
 
     switch(program){
+    case 0:
+        launch_nalloc_test(private_pools_test, "private_pools_test");
+        break;
     case 1:
-        launch_test((void *(*)(void*))mt_child_rand, "mt_child_rand");
+        launch_nalloc_test(shared_pools_test, "shared_pools_test");
         break;
     }
 
