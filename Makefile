@@ -11,6 +11,8 @@ OBJS:=$(subst $(SRCD),$(OBJD),$(patsubst %.c,%.o,$(patsubst %.S,%.o,$(SRCS))))
 DIRS:=$(shell echo $(dir $(OBJS)) | tr ' ' '\n' | sort -u | tr '\n' ' ')
 CFLAGS:=$(INC)\
 	-O3 \
+	-g\
+	-fno-omit-frame-pointer\
 	-flto=jobserver\
 	-fuse-linker-plugin\
 	-D_GNU_SOURCE\
@@ -30,7 +32,6 @@ CFLAGS:=$(INC)\
 	-Wno-unused-variable\
 	-std=gnu11\
 	-pthread\
-	-fno-omit-frame-pointer\
 	-include "dialect.h"\
 	-m64\
 	-mcx16\
@@ -38,21 +39,23 @@ CFLAGS:=$(INC)\
 LD:=$(CC)
 LDFLAGS:=-fvisibility=hidden -lprofiler $(CFLAGS)
 
-all: test ref
+all: test pt_ref je_ref tc_ref ll_ref
 
 test: $(DIRS) $(SRCD)/TAGS $(OBJS) Makefile
 	+ $(LD) $(LDFLAGS) -o $@ $(OBJS)
 
 TEST_OBJS=$(filter-out $(OBJD)/nalloc/nalloc.o, $(OBJS))
-ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
+pt_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
 	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS)
 
 je_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
-	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS)
+	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS) ./libjemalloc.so
 
 tc_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
-	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS)
+	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS) ./libtcmalloc.so
 
+ll_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
+	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS) ./libllalloc.so.1.3
 
 $(DIRS):
 	mkdir -p $@

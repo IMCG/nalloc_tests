@@ -1,6 +1,6 @@
 #pragma once
 
-#define DBG 0
+#define DBG 2
 #define BRK 2
 #define PRNT 4
 

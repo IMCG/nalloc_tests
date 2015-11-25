@@ -6,13 +6,6 @@
 #include <wrand.h>
 #include <test_framework.h>
 
-cnt max_allocs = 10000;
-cnt niter = 10000000;
-cnt max_writes = 0;
-cnt max_size = 128;
-bool print_profile = 0;
-int program;
-
 #define NOPS (niter / nthreads)
 
 #define NSHARED_POOLS 32
@@ -20,6 +13,14 @@ int program;
 
 #define MIN_SIZE (sizeof(tstblock))
 
+cnt max_allocs = 10000;
+cnt niter = 10000000;
+cnt max_writes = 0;
+cnt max_size = 128;
+bool print_profile = 0;
+int program;
+
+static lfstack shared[NSHARED_POOLS] = {[0 ... NSHARED_POOLS - 1] = LFSTACK};
 
 /* Fall back to system malloc when compiling without nalloc.o for reference tests. */
 __attribute__((__weak__))
@@ -114,7 +115,6 @@ void private_pools_test(uint tid){
 }
 
 void shared_pools_test(uint tid){
-    static lfstack shared[NSHARED_POOLS] = {[0 ... NSHARED_POOLS - 1] = LFSTACK};
     cnt allocs = 0;
 
     thr_sync(start_timing);
@@ -361,6 +361,9 @@ void shared_pools_test(uint tid){
 
 static void launch_nalloc_test(void *test, const char *name){
     launch_test(test, name);
+    for(idx i = 0; i < NSHARED_POOLS; i++)
+        for(tstblock *b; (b = cof(lfstack_pop(&shared[i]), tstblock, sanc));)
+            sfree(b, b->bytes);
     nalloc_profile_report();
 }
 
