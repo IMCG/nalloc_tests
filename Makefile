@@ -26,6 +26,7 @@ CFLAGS:=$(INC)\
 	-Wno-unused-parameter \
 	-Wno-unused-function\
 	-Wno-unused-value\
+	-Wno-misleading-indentation\
 	-Wno-address\
 	-fplan9-extensions\
 	-ftrack-macro-expansion=0\

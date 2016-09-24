@@ -1,24 +1,15 @@
 [submodule "src/nalloc"]
 	path = src/nalloc
-	url = ./src/nalloc
+	url = cmu:~apodolsk/repo/nalloc
 [submodule "stacks"]
-	path = stacks
-	url = ./src/stacks
-[submodule "lists"]
-	path = lists
-	url = ./src/lists
-[submodule "nalloc"]
-	path = nalloc
-	url = ./src/nalloc
-[submodule "linux_dialect"]
-	path = linux_dialect
-	url = ./src/linux_dialect
-[submodule "src/stacks"]
 	path = src/stacks
-	url = ./src/stacks
-[submodule "src/lists"]
+	url = cmu:~apodolsk/repo/stacks
+[submodule "lists"]
 	path = src/lists
-	url = ./src/lists
-[submodule "src/linux_dialect"]
+	url = cmu:~apodolsk/repo/lists
+[submodule "nalloc"]
+	path = src/nalloc
+	url = cmu:~apodolsk/repo/nalloc
+[submodule "linux_dialect"]
 	path = src/linux_dialect
-	url = ./src/linux_dialect
+	url = cmu:~apodolsk/repo/linux_dialect
