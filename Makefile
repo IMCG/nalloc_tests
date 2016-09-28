@@ -40,7 +40,7 @@ CFLAGS:=$(INC)\
 LD:=$(CC)
 LDFLAGS:=-fvisibility=hidden -lprofiler $(CFLAGS)
 
-all: test pt_ref je_ref tc_ref ll_ref
+all: test pt_ref je_ref tc_ref
 
 test: $(DIRS) $(SRCD)/TAGS $(OBJS) Makefile
 	+ $(LD) $(LDFLAGS) -o $@ $(OBJS)
@@ -55,8 +55,9 @@ je_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
 tc_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
 	+ $(LD) $(LDFLAGS) -ltcmalloc -o $@ $(TEST_OBJS)
 
+# TODO: figure out license issues.
 # ll_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
-# 	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS) ./libllalloc.so.1.3
+# 	+ $(LD) $(LDFLAGS) -Xlinker -rpath=. -L . -l :libllalloc.so.1.3 -o $@ $(TEST_OBJS)
 
 $(DIRS):
 	mkdir -p $@
