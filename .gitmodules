@@ -1,15 +1,15 @@
 [submodule "src/nalloc"]
 	path = src/nalloc
-	url = cmu:~apodolsk/repo/nalloc
+	url = https://github.com/apodolsk/nalloc.git
 [submodule "stacks"]
 	path = src/stacks
-	url = cmu:~apodolsk/repo/stacks
+	url = https://github.com/apodolsk/stacks.git
 [submodule "lists"]
 	path = src/lists
-	url = cmu:~apodolsk/repo/lists
+	url = https://github.com/apodolsk/lists.git
 [submodule "nalloc"]
 	path = src/nalloc
-	url = cmu:~apodolsk/repo/nalloc
+	url = https://github.com/apodolsk/nalloc.git
 [submodule "linux_dialect"]
 	path = src/linux_dialect
-	url = cmu:~apodolsk/repo/linux_dialect
+	url = https://github.com/apodolsk/linux_dialect.git

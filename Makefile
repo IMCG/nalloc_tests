@@ -1,5 +1,5 @@
 BUILTIN_VARS:=$(.VARIABLES)
-CC:=gcc
+CC:=clang
 SRCD:=src
 OBJD:=obj
 INC:=$(shell find -L $(SRCD) -not -path "*/.*" -type d | sed s/^/-I/)
@@ -10,11 +10,12 @@ SRCS:=$(SRCS_C) $(SRCS_S)
 OBJS:=$(subst $(SRCD),$(OBJD),$(patsubst %.c,%.o,$(patsubst %.S,%.o,$(SRCS))))
 DIRS:=$(shell echo $(dir $(OBJS)) | tr ' ' '\n' | sort -u | tr '\n' ' ')
 CFLAGS:=$(INC)\
+	-std=gnu11\
+	-fms-extensions\
+	-include "dialect.h"\
 	-O3 \
+	-flto\
 	-g\
-	-fno-omit-frame-pointer\
-	-flto=jobserver\
-	-fuse-linker-plugin\
 	-D_GNU_SOURCE\
 	-Wall \
 	-Wextra \
@@ -26,14 +27,13 @@ CFLAGS:=$(INC)\
 	-Wno-unused-parameter \
 	-Wno-unused-function\
 	-Wno-unused-value\
-	-Wno-misleading-indentation\
 	-Wno-address\
-	-fplan9-extensions\
-	-ftrack-macro-expansion=0\
 	-Wno-unused-variable\
-	-std=gnu11\
+	-Wno-microsoft-anon-tag\
+	-Wno-unknown-pragmas\
 	-pthread\
-	-include "dialect.h"\
+	-march=native\
+	-mtune=native\
 	-m64\
 	-mcx16\
 
@@ -50,13 +50,13 @@ pt_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
 	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS)
 
 je_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
-	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS) ./libjemalloc.so
+	+ $(LD) $(LDFLAGS) -ljemalloc -o $@ $(TEST_OBJS)
 
 tc_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
-	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS) ./libtcmalloc.so
+	+ $(LD) $(LDFLAGS) -ltcmalloc -o $@ $(TEST_OBJS)
 
-ll_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
-	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS) ./libllalloc.so.1.3
+# ll_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
+# 	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS) ./libllalloc.so.1.3
 
 $(DIRS):
 	mkdir -p $@
