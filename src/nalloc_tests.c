@@ -8,8 +8,8 @@
 
 #define NOPS (niter / nthreads)
 
-#define NSHARED_POOLS 32
-#define NSHUFFLER_LISTS 16
+#define NSHARED_POOLS 1
+#define NSHUFFLER_LISTS 4
 
 #define MIN_SIZE (sizeof(tstblock))
 
@@ -68,7 +68,7 @@ void write_magics(tstblock *b, uint magic){
 }
 
 void check_magics(tstblock *b, uint magic){
-    size max = umin(div_pow2(b->bytes - sizeof(*b), sizeof(b->magics[0])),
+    idx max = umin(div_pow2(b->bytes - sizeof(*b), sizeof(b->magics[0])),
                     max_writes);
     for(idx i = b->write_start; i < max; i++)
         assert(b->magics[i] == magic);

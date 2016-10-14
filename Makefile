@@ -1,5 +1,5 @@
 BUILTIN_VARS:=$(.VARIABLES)
-CC:=clang
+CC:=gcc
 SRCD:=src
 OBJD:=obj
 INC:=$(shell find -L $(SRCD) -not -path "*/.*" -type d | sed s/^/-I/)
@@ -10,12 +10,12 @@ SRCS:=$(SRCS_C) $(SRCS_S)
 OBJS:=$(subst $(SRCD),$(OBJD),$(patsubst %.c,%.o,$(patsubst %.S,%.o,$(SRCS))))
 DIRS:=$(shell echo $(dir $(OBJS)) | tr ' ' '\n' | sort -u | tr '\n' ' ')
 CFLAGS:=$(INC)\
+	-Og \
+	-g\
+	-flto\
 	-std=gnu11\
 	-fms-extensions\
 	-include "dialect.h"\
-	-O3 \
-	-flto\
-	-g\
 	-D_GNU_SOURCE\
 	-Wall \
 	-Wextra \
@@ -38,15 +38,15 @@ CFLAGS:=$(INC)\
 	-mcx16\
 
 LD:=$(CC)
-LDFLAGS:=-fvisibility=hidden -lprofiler $(CFLAGS)
+LDFLAGS:=-fvisibility=hidden $(CFLAGS)
 
-all: test pt_ref je_ref tc_ref
+all: test libc_ref
 
 test: $(DIRS) $(SRCD)/TAGS $(OBJS) Makefile
 	+ $(LD) $(LDFLAGS) -o $@ $(OBJS)
 
 TEST_OBJS=$(filter-out $(OBJD)/nalloc/nalloc.o, $(OBJS))
-pt_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
+libc_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
 	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS)
 
 je_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
