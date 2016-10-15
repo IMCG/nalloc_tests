@@ -1,1 +1,1 @@
-[See nalloc submodule README](/src/nalloc/README.md)
+[See nalloc submodule README](https://github.com/apodolsk/nalloc/blob/master/README.md)
