@@ -1,5 +1,5 @@
 BUILTIN_VARS:=$(.VARIABLES)
-CC:=gcc
+CC:=clang
 SRCD:=src
 OBJD:=obj
 INC:=$(shell find -L $(SRCD) -not -path "*/.*" -type d | sed s/^/-I/)
@@ -29,16 +29,17 @@ CFLAGS:=$(INC)\
 	-Wno-unused-value\
 	-Wno-address\
 	-Wno-unused-variable\
-	-Wno-microsoft-anon-tag\
 	-Wno-unknown-pragmas\
 	-pthread\
 	-march=native\
 	-mtune=native\
 	-m64\
 	-mcx16\
+	-Wno-microsoft-anon-tag\
 
 LD:=$(CC)
 LDFLAGS:=-fvisibility=hidden $(CFLAGS)
+
 
 all: test libc_ref
 

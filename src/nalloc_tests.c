@@ -1,4 +1,4 @@
- #define MODULE NALLOCTESTSM
+#define MODULE NALLOCTESTSM
 
 #include <list.h>
 #include <nalloc.h>
@@ -13,20 +13,10 @@
 
 #define MIN_SIZE (sizeof(tstblock))
 
-typedef volatile struct{
-    union{
-        lanchor lanc;
-        sanchor sanc;
-    };
-    size bytes;
-    idx write_start;
-    uptr magics[];
-} tstblock;
-
 cnt max_allocs = 10000;
 cnt niter = 10000000;
-cnt max_writes = 0;
-cnt max_size = sizeof(tstblock);
+cnt max_writes = 1;
+cnt max_size = 128;
 bool print_profile = 0;
 int program;
 
@@ -60,17 +50,26 @@ void profile_report(void){
     nalloc_profile_report();
 }
 
+typedef struct{
+    union{
+        lanchor lanc;
+        sanchor sanc;
+    };
+    size bytes;
+    uptr magics[];
+} tstblock;
+
 void write_magics(tstblock *b, uint magic){
     idx max = umin(div_pow2(b->bytes - sizeof(*b), sizeof(b->magics[0])),
                    max_writes);
-    for(idx i = b->write_start = max ? rand() % max : 0; i < max; i++)
+    for(idx i = 0; i < max; i++)
         b->magics[i] = magic;
 }
 
 void check_magics(tstblock *b, uint magic){
     idx max = umin(div_pow2(b->bytes - sizeof(*b), sizeof(b->magics[0])),
                     max_writes);
-    for(idx i = b->write_start; i < max; i++)
+    for(idx i = 0; i < max; i++)
         assert(b->magics[i] == magic);
 }
 
@@ -102,18 +101,29 @@ void private_pools_test(uint tid){
             tstblock *b = cof(list_deq(blocks), tstblock, lanc);
             if(!b)
                 continue;
-            assert(b->bytes <= max_size && b->bytes >= MIN_SIZE);
+            assert(b->bytes >= MIN_SIZE && b->bytes <= max_size);
             allocs--;
             check_magics(b, tid);
-            sfree((void *) b, b->bytes);
+            sfree(b, b->bytes);
         }
     }
 
     for(uint i = 0; i < NSHUFFLER_LISTS; i++)
         for(tstblock *b; (b = cof(list_deq(&blists[i]), tstblock, lanc));)
-            sfree((void *) b, b->bytes);
+            sfree(b, b->bytes);
 
     thr_sync(stop_timing);
+}
+
+typedef struct{
+    void *b;
+    idx gen;
+} flent;
+dbg used static __thread flent flog[16];
+dbg static __thread idx flog_idx = 0;
+
+void update_flog(void *b){
+    flog[flog_idx++ % 16] = (flent){.b = b, .gen = shared[0].gen};
 }
 
 void shared_pools_test(uint tid){
@@ -122,8 +132,8 @@ void shared_pools_test(uint tid){
     thr_sync(start_timing);
 
     for(uint i = 0; i < NOPS; i++){
-        assert(allocs < max_allocs + max_size);
-        lfstack *s = &shared[mod_pow2(rand(), NSHARED_POOLS)];
+        /* lfstack *s = &shared[mod_pow2(rand(), NSHARED_POOLS)]; */
+        lfstack *s = &shared[0];
         if(randpcnt(!allocs ? 100 :
                     allocs < max_allocs/2 ? 75 :
                     allocs < max_allocs ? 50 :
@@ -133,245 +143,35 @@ void shared_pools_test(uint tid){
             tstblock *b = smalloc(bytes);
             if(!b)
                 continue;
-            *b = (tstblock) {.bytes = bytes, .lanc = LANCHOR(NULL)};
             allocs++;
+            *b = (tstblock) {.bytes = bytes, .sanc = SANCHOR};
             write_magics(b, (uptr) b);
             lfstack_push(&b->sanc, s);
         }else{
             tstblock *b = cof(lfstack_pop(s), tstblock, lanc);
             if(!b)
                 continue;
-            /* assert(b->bytes <= max_size && b->bytes >= MIN_SIZE); */
-            if(!(b->bytes <= max_size && b->bytes >= MIN_SIZE))
-                ppl(0, b), assert(0);
-            
+            /* assert(b->bytes >= MIN_SIZE && b->bytes <= max_size); */
+            if(!(b->bytes >= MIN_SIZE && b->bytes <= max_size)){
+                ppl(0, b, b->bytes, b->magics[0], s);
+                assert(0);
+            }
+                
             allocs--;
             check_magics(b, (uptr) b);
-            sfree((void *) b, b->bytes);
+            update_flog(b);
+            sfree(b, b->bytes);
         }
     }
 
     thr_sync(stop_timing);
 }
 
-/* void mt_sharing_child(uint tid){ */
-/*     thr_setup(tid); */
-
-/*     sem_post(&kid_rdy); */
-/*     sem_wait(&world_rdy); */
-
-/*     list priv_blocks[NSHUFFLER_LISTS]; */
-/*     for(uint i = 0; i < NSHUFFLER_LISTS; i++) */
-/*         priv_blocks[i] = (list) LIST(&priv_blocks[i], NULL); */
-
-/*     uint num_blocks = 0; */
-/*     for(uint i = 0; i < NOPS; i++){ */
-/*         int size; */
-/*         lfstack *shared = &shared->block_stacks[rand() % NSHARED_POOLS].s; */
-/*         list *priv = &priv_blocks[rand()  */
-/*         int malloc_prob = */
-/*             num_blocks < max_allocs/2 ? 75 : */
-/*             num_blocks < max_allocs ? 50 : */
-/*             num_blocks < 2 * max_allocs ? 25 : */
-/*             0; */
-
-/*         if(randpcnt(malloc_prob)){ */
-/*             size bytes = umax(MIN_SIZE, rand() % (max_size)); */
-/*             b = smalloc(bytes); */
-/*             if(!b) */
-/*                 continue; */
-/*             log(2, "Allocated: %", b); */
-/*             *b = (tstblock) { .bytes = bytes, .sanc = SANCHOR }; */
-/*             /\* Try to trigger false sharing. *\/ */
-/*             write_magics(b, tid); */
-/*             lfstack_push(&b->sanc, shared); */
-/*             num_blocks++; */
-/*         }else{ */
-/*             b = */
-/*                 cof(lfstack_pop(blocks), tstblock, sanc); */
-/*             if(!b) */
-/*                 continue; */
-/*             log(2, "Claiming: %", b); */
-/*             write_magics(b, tid); */
-/*             b->lanc = (lanchor) LANCHOR(NULL); */
-/*             list_enq(&b->lanc, &priv_blocks[rand() % NSHUFFLER_LISTS]); */
-/*         } */
-
-/*         if(randpcnt(2 * (100 - malloc_prob))){ */
-/*             b = cof(list_deq(&priv_blocks[rand() % NSHUFFLER_LISTS]), */
-/*                             tstblock, lanc); */
-/*             if(!b) */
-/*                 continue; */
-/*             log(2, "Freeing priv: %", b); */
-/*             check_magics(b, tid); */
-/*             sfree(b, b->bytes); */
-/*             num_blocks--; */
-/*         } */
-/*     } */
-
-/*     profile_report(); */
-/* } */
-
-/* void producer_child(struct child_args *shared); */
-/* void produce(struct child_args *shared); */
-
-/* void producerest(void){ */
-/*     struct child_args shared; */
-/*     shared.parentid =get_dbg_id(); */
-/*     for(uint i = 0; i < NSHARED_POOLS; i++) */
-/*         shared.block_stacks[i].s = (lfstack) LFSTACK; */
-
-/*     pthread_t kids[nthreads]; */
-/*     for(uint i = 0; i < nthreads; i++) */
-/*         if(kfork((entrypoint *) mt_sharing_child, &shared, KERN_ONLY) < 0) */
-/*             EWTF("Failed to fork."); */
-
-/*     rdy = true; */
-
-/*     produce(&shared); */
-
-/*     for(uint i = 0; i < nthreads; i++) */
-/*         assert(!pthread_join(kids[i], (void *[]){NULL})); */
-
-/*     for(uint i = 0; i < NSHARED_POOLS; i++){ */
-/*         lfstack *blocks = &shared.block_stacks[i].s; */
-/*         tstblock *b; */
-/*         while((b = cof(lfstack_pop(blocks), tstblock, sanc))) */
-/*             sfree(b, b->size); */
-/*     } */
-/* } */
-
-/* void produce(struct child_args *shared){ */
-/*     int tid =get_dbg_id(); */
-/*     wsrand(rdtsc()); */
-
-/*     stack priv_blocks = (stack) STACK; */
-/*     tstblock *b; */
-/*     uint num_blocks = 0; */
-/*     for(uint i = 0; i < NOPS; i++){ */
-/*         lfstack *shared= &shared->block_stacks[rand() % NSHARED_POOLS].s; */
-/*         int malloc_prob = */
-/*             num_blocks < nthreads * max_allocs/2 ? 90 : */
-/*             num_blocks < nthreads * max_allocs ? 70 : */
-/*             num_blocks < nthreads * max_allocs * 2 ? 25 : */
-/*             0; */
-
-/*         if(randpcnt(malloc_prob)){ */
-/*             cnt size = umax(MIN_SIZE, rand() % (max_size)); */
-/*             b = smalloc(size); */
-/*             if(!b) */
-/*                 continue; */
-/*             log(2, "Allocated: %", b); */
-/*             *b = (tstblock) { .bytes = size, .sanc = SANCHOR }; */
-/*             /\* Try to trigger false sharing. *\/ */
-/*             write_magics(b, tid); */
-/*             lfstack_push(&b->sanc, shared); */
-/*             num_blocks++; */
-/*         }else { */
-/*             b = cof(lfstack_pop(blocks), tstblock, sanc); */
-/*             if(!b) */
-/*                 continue; */
-/*             log(2, "Claiming: %", b); */
-/*             write_magics(b, tid); */
-/*             stack_push(&b->sanc, &priv_blocks); */
-/*             num_blocks--; */
-/*         } */
-
-/*         if(randpcnt(100 - malloc_prob)){ */
-/*             b = */
-/*                 cof(stack_pop(&priv_blocks), tstblock, sanc); */
-/*             if(!b) */
-/*                 continue; */
-/*             log(2, "Freeing priv: %", b); */
-/*             check_magics(b, tid); */
-/*             sfree(b, b->size); */
-/*         } */
-/*     } */
-    
-/* } */
-
-/* void consumer_child(struct child_args *shared){ */
-/*     int parentid = shared->parentid; */
-/*     int tid =get_dbg_id(); */
-/*     tstblock *b; */
-/*     wsrand(rdtsc()); */
-
-/*     while(rdy == false) */
-/*         _yield(parentid); */
-
-/*     stack priv_blocks = STACK; */
-/*     uint num_blocks = 0; */
-/*     for(uint i = 0; i < NOPS; i++){ */
-/*         lfstack *blocks= &shared->block_stacks[rand() % NSHARED_POOLS].s; */
-/*         int free_prob =  */
-/*             num_blocks < max_allocs/2 ? 25 : */
-/*             num_blocks < max_allocs ? 50 : */
-/*             num_blocks < max_allocs * 2 ? 75 : */
-/*             100; */
-
-/*         if(randpcnt(free_prob)){ */
-/*             b = */
-/*                 cof(stack_pop(&priv_blocks), tstblock, sanc); */
-/*             if(!b) */
-/*                 continue; */
-/*             log(2, "Freeing priv: %", b); */
-/*             check_magics(b, tid); */
-/*             sfree(b, b->size); */
-/*             num_blocks--; */
-/*         } else { */
-/*             b = */
-/*                 cof(lfstack_pop(blocks), tstblock, sanc); */
-/*             if(!b) */
-/*                 continue; */
-/*             log(2, "Claiming: %", b); */
-/*             write_magics(b, tid); */
-/*             stack_push(&b->sanc, &priv_blocks); */
-/*             num_blocks++; */
-/*         } */
-
-
-/*     } */
-
-/*     profile_report(); */
-/* } */
-
-/* #define NBYTES (64000 * PAGE_SIZE) */
-/* #define NBYTES 128 */
-/* #define REPS 10000 */
-/* volatile uptr update_mem[NBYTES]; */
-
-/* void plain_update_kid(void){ */
-/*     for(int r = 0; r < REPS; r++) */
-/*         for(uint i = 0; i < NBYTES/sizeof(*update_mem); i++) */
-/*             if(!update_mem[i]) */
-/*                 update_mem[i] = 1; */
-/* } */
-
-/* void plain_update(void){ */
-/*     pthread_t kids[nthreads]; */
-/*     for(uint i = 0; i < nthreads; i++) */
-/*         if(kfork((entrypoint *) plain_update_kid, NULL, KERN_ONLY) < 0) */
-/*             EWTF("Failed to fork."); */
-/* } */
-
-/* void cas_update_kid(void){ */
-/*     for(int r = 0; r < REPS; r++) */
-/*         for(uint i = 0; i < NBYTES/sizeof(*update_mem); i++) */
-/*             (void) cas((uptr) 1, &update_mem[i], (uptr) 0); */
-/* } */
-
-/* void cas_update(void){ */
-/*     pthread_t kids[nthreads]; */
-/*     for(uint i = 0; i < nthreads; i++) */
-/*         if(kfork((entrypoint *) cas_update_kid, NULL, KERN_ONLY) < 0) */
-/*             EWTF("Failed to fork."); */
-/* } */
-
 static void launch_nalloc_test(void *test, const char *name){
     launch_test(test, name);
     for(idx i = 0; i < NSHARED_POOLS; i++)
         for(tstblock *b; (b = cof(lfstack_pop(&shared[i]), tstblock, sanc));)
-            sfree((void *) b, b->bytes);
+            sfree(b, b->bytes);
     nalloc_profile_report();
 }
 
