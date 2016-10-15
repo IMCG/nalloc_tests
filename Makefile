@@ -41,7 +41,7 @@ LD:=$(CC)
 LDFLAGS:=-fvisibility=hidden $(CFLAGS)
 
 
-all: test libc_ref
+all: test libc_ref je_ref tc_ref
 
 test: $(DIRS) $(SRCD)/TAGS $(OBJS) Makefile
 	+ $(LD) $(LDFLAGS) -o $@ $(OBJS)
@@ -51,10 +51,10 @@ libc_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
 	+ $(LD) $(LDFLAGS) -o $@ $(TEST_OBJS)
 
 je_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
-	+ $(LD) $(LDFLAGS) -ljemalloc -o $@ $(TEST_OBJS)
+	-+ $(LD) $(LDFLAGS) -ljemalloc -o $@ $(TEST_OBJS)
 
 tc_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
-	+ $(LD) $(LDFLAGS) -ltcmalloc -o $@ $(TEST_OBJS)
+	-+ $(LD) $(LDFLAGS) -ltcmalloc -o $@ $(TEST_OBJS)
 
 # TODO: figure out license issues.
 # ll_ref: $(DIRS) $(SRCD)/TAGS $(TEST_OBJS) Makefile
