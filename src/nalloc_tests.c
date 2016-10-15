@@ -6,19 +6,18 @@
 #include <wrand.h>
 #include <test_framework.h>
 
-#define NOPS (niter / nthreads)
-
-#define NSHARED_POOLS 1
+#define NSHARED_POOLS 2
 #define NSHUFFLER_LISTS 4
 
 #define MIN_SIZE (sizeof(tstblock))
+
+#define NOPS (niter / nthreads)
 
 cnt max_allocs = 10000;
 cnt niter = 10000000;
 cnt max_writes = 1;
 cnt max_size = 128;
-bool print_profile = 0;
-int program;
+int program = 1;
 
 static lfstack shared[NSHARED_POOLS] = {[0 ... NSHARED_POOLS - 1] = LFSTACK};
 
@@ -132,8 +131,7 @@ void shared_pools_test(uint tid){
     thr_sync(start_timing);
 
     for(uint i = 0; i < NOPS; i++){
-        /* lfstack *s = &shared[mod_pow2(rand(), NSHARED_POOLS)]; */
-        lfstack *s = &shared[0];
+        lfstack *s = &shared[mod_pow2(rand(), NSHARED_POOLS)];
         if(randpcnt(!allocs ? 100 :
                     allocs < max_allocs/2 ? 75 :
                     allocs < max_allocs ? 50 :
