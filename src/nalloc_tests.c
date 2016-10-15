@@ -3,7 +3,7 @@
 #include <list.h>
 #include <nalloc.h>
 #include <unistd.h>
-#include <wrand.h>
+#include <wkrand.h>
 #include <test_framework.h>
 
 #define NSHARED_POOLS 2
@@ -12,6 +12,8 @@
 #define MIN_SIZE (sizeof(tstblock))
 
 #define NOPS (niter / nthreads)
+#define UPDATE_LOG 0
+#define LOG_SIZE 16
 
 cnt max_allocs = 10000;
 cnt niter = 10000000;
@@ -20,6 +22,18 @@ cnt max_size = 128;
 int program = 1;
 
 static lfstack shared[NSHARED_POOLS] = {[0 ... NSHARED_POOLS - 1] = LFSTACK};
+
+typedef struct{
+    void *b;
+    idx gen;
+} flent;
+dbg used static __thread flent log[LOG_SIZE];
+dbg static __thread idx log_idx = 0;
+
+void update_log(void *b){
+    if(UPDATE_LOG)
+        log[log_idx++ % LOG_SIZE] = (flent){.b = b, .gen = shared[0].gen};
+}
 
 /* Fall back to system malloc when compiling without nalloc.o for reference tests. */
 __attribute__((__weak__))
@@ -114,17 +128,6 @@ void private_pools_test(uint tid){
     thr_sync(stop_timing);
 }
 
-typedef struct{
-    void *b;
-    idx gen;
-} flent;
-dbg used static __thread flent flog[16];
-dbg static __thread idx flog_idx = 0;
-
-void update_flog(void *b){
-    flog[flog_idx++ % 16] = (flent){.b = b, .gen = shared[0].gen};
-}
-
 void shared_pools_test(uint tid){
     cnt allocs = 0;
 
@@ -149,15 +152,11 @@ void shared_pools_test(uint tid){
             tstblock *b = cof(lfstack_pop(s), tstblock, lanc);
             if(!b)
                 continue;
-            /* assert(b->bytes >= MIN_SIZE && b->bytes <= max_size); */
-            if(!(b->bytes >= MIN_SIZE && b->bytes <= max_size)){
-                ppl(0, b, b->bytes, b->magics[0], s);
-                assert(0);
-            }
+            assert(b->bytes >= MIN_SIZE && b->bytes <= max_size);
                 
             allocs--;
             check_magics(b, (uptr) b);
-            update_flog(b);
+            update_log(b);
             sfree(b, b->bytes);
         }
     }
