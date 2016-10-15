@@ -12,6 +12,7 @@ DIRS:=$(shell echo $(dir $(OBJS)) | tr ' ' '\n' | sort -u | tr '\n' ' ')
 CFLAGS:=$(INC)\
 	-O3 \
 	-g\
+	-flto\
 	-std=gnu11\
 	-fms-extensions\
 	-include "dialect.h"\
