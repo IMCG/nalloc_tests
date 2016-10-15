@@ -1,4 +1,4 @@
-#define MODULE NALLOCTESTSM
+ #define MODULE NALLOCTESTSM
 
 #include <list.h>
 #include <nalloc.h>
@@ -13,10 +13,20 @@
 
 #define MIN_SIZE (sizeof(tstblock))
 
+typedef volatile struct{
+    union{
+        lanchor lanc;
+        sanchor sanc;
+    };
+    size bytes;
+    idx write_start;
+    uptr magics[];
+} tstblock;
+
 cnt max_allocs = 10000;
 cnt niter = 10000000;
 cnt max_writes = 0;
-cnt max_size = 128;
+cnt max_size = sizeof(tstblock);
 bool print_profile = 0;
 int program;
 
@@ -50,16 +60,6 @@ void profile_report(void){
     nalloc_profile_report();
 }
 
-typedef struct{
-    union{
-        lanchor lanc;
-        sanchor sanc;
-    };
-    size bytes;
-    idx write_start;
-    uptr magics[];
-} tstblock;
-
 void write_magics(tstblock *b, uint magic){
     idx max = umin(div_pow2(b->bytes - sizeof(*b), sizeof(b->magics[0])),
                    max_writes);
@@ -85,7 +85,8 @@ void private_pools_test(uint tid){
 
     for(uint i = 0; i < NOPS; i++){
         list *blocks = &blists[mod_pow2(rand(), NSHUFFLER_LISTS)];
-        if(randpcnt(allocs < max_allocs/2 ? 75 :
+        if(randpcnt(!allocs ? 100 :
+                    allocs < max_allocs/2 ? 75 :
                     allocs < max_allocs ? 50 :
                     0))
         {
@@ -101,15 +102,16 @@ void private_pools_test(uint tid){
             tstblock *b = cof(list_deq(blocks), tstblock, lanc);
             if(!b)
                 continue;
+            assert(b->bytes <= max_size && b->bytes >= MIN_SIZE);
             allocs--;
             check_magics(b, tid);
-            sfree(b, b->bytes);
+            sfree((void *) b, b->bytes);
         }
     }
 
     for(uint i = 0; i < NSHUFFLER_LISTS; i++)
         for(tstblock *b; (b = cof(list_deq(&blists[i]), tstblock, lanc));)
-            sfree(b, b->bytes);
+            sfree((void *) b, b->bytes);
 
     thr_sync(stop_timing);
 }
@@ -120,8 +122,10 @@ void shared_pools_test(uint tid){
     thr_sync(start_timing);
 
     for(uint i = 0; i < NOPS; i++){
+        assert(allocs < max_allocs + max_size);
         lfstack *s = &shared[mod_pow2(rand(), NSHARED_POOLS)];
-        if(randpcnt(allocs < max_allocs/2 ? 75 :
+        if(randpcnt(!allocs ? 100 :
+                    allocs < max_allocs/2 ? 75 :
                     allocs < max_allocs ? 50 :
                     0))
         {
@@ -129,17 +133,21 @@ void shared_pools_test(uint tid){
             tstblock *b = smalloc(bytes);
             if(!b)
                 continue;
-            allocs++;
             *b = (tstblock) {.bytes = bytes, .lanc = LANCHOR(NULL)};
+            allocs++;
             write_magics(b, (uptr) b);
             lfstack_push(&b->sanc, s);
         }else{
             tstblock *b = cof(lfstack_pop(s), tstblock, lanc);
             if(!b)
                 continue;
+            /* assert(b->bytes <= max_size && b->bytes >= MIN_SIZE); */
+            if(!(b->bytes <= max_size && b->bytes >= MIN_SIZE))
+                ppl(0, b), assert(0);
+            
             allocs--;
             check_magics(b, (uptr) b);
-            sfree(b, b->bytes);
+            sfree((void *) b, b->bytes);
         }
     }
 
@@ -363,7 +371,7 @@ static void launch_nalloc_test(void *test, const char *name){
     launch_test(test, name);
     for(idx i = 0; i < NSHARED_POOLS; i++)
         for(tstblock *b; (b = cof(lfstack_pop(&shared[i]), tstblock, sanc));)
-            sfree(b, b->bytes);
+            sfree((void *) b, b->bytes);
     nalloc_profile_report();
 }
 
